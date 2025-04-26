@@ -3,3 +3,5 @@ obj/
 client
 server
 **/sync_dir/
+in.*
+out.*
