@@ -7,10 +7,12 @@
 #include <sys/types.h>
 #include <sys/inotify.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
 #include <errno.h>
 #include <linux/limits.h>
+#include <netinet/in.h>
+#include <netdb.h> 
+
+#include "../util/communication.h"
 
 #define EVENT_BUF_LEN (1024 * (sizeof(struct inotify_event) + 16))
 #define OK       0
@@ -175,8 +177,57 @@ int set_sync_dir_path(){
 }
 
 
+void *test_thread(void *arg){
+    int port = *((u_int16_t *) arg);
+    free(arg);
+    int sockfd, n;
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+	
+    char buffer[256];
+    char *hostname = "localhost";
+    
+	
+	server = gethostbyname(hostname);
+	if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host\n");
+        exit(0);
+    }
+    
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+        printf("ERROR opening socket\n");
+    } 
+        
+	serv_addr.sin_family = AF_INET;     
+	serv_addr.sin_port = htons(port);    
+	serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+	bzero(&(serv_addr.sin_zero), 8);     
+	
+    
+	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
+        printf("ERROR connecting\n");
 
-int main(int argc, char *argv[]) { 
+    FILE *file_ptr = fopen("in.pdf", "rb");
+    if(file_ptr == NULL)
+    {
+        printf("Error opening file!");   
+        exit(1);             
+    }
+    send_file(sockfd,file_ptr);
+    bzero(buffer,256);
+    n = read(sockfd, buffer, 256);
+    if (n < 0) 
+		printf("ERROR reading from socket\n");
+
+    printf("%s\n",buffer);
+    
+	close(sockfd);
+    pthread_exit(NULL);
+}
+
+
+
+int main(int argc, char* argv[]){ 
     char *username;
 
     if (argc >= 2) {
@@ -186,6 +237,8 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    u_int16_t *port = malloc(sizeof(*port));
+    *port = 4000;
     if(set_sync_dir_path() != 0){
         return EXIT_FAILURE;
     }
@@ -265,9 +318,25 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    pthread_t console_thread, file_watcher_thread;
+    if(argc > 1){
+        *port = atoi(argv[1]);
+    }
+
+    pthread_t console_thread, file_watcher_thread, test_thread;
     pthread_create(&console_thread, NULL, start_console_input_thread, NULL);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, NULL);
+
+
+
+
+
+    pthread_create(&test_thread, NULL, connect_to_server, port);
+
+
+
+
+
+    
 
     pthread_join(console_thread, NULL);
 

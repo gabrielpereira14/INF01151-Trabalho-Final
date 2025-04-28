@@ -8,6 +8,8 @@
 #include <pthread.h>
 #include <signal.h>
 
+#include "../util/communication.h"
+
 #define PORT_INTERFACE 4000
 #define SERVER_PORT_SEND 4001
 #define SERVER_PORT_RECEIVE 4002
@@ -28,6 +30,10 @@ int sock_interface_listen = -1, sock_send_listen = -1, sock_receive_listen = -1;
 int main() {
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
+
+
+	pthread_t test_thread_i;
+	pthread_create(&test_thread_i, NULL, test_thread, NULL);
 
     // Cria os sockets de espera de conecção
 	if ((sock_interface_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
@@ -161,4 +167,41 @@ void termination(int sig) {
 	// TODO: fechar todas as sessões abertas
 
 	exit(EXIT_SUCCESS);
+}
+
+#define TEST_PORT 4003
+void *test_thread(void* arg) {
+	int sockfd, newsockfd;
+	socklen_t clilen;
+	
+	struct sockaddr_in serv_addr, cli_addr;
+	
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
+        printf("ERROR opening socket");
+	
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(TEST_PORT);
+	serv_addr.sin_addr.s_addr = INADDR_ANY;
+	bzero(&(serv_addr.sin_zero), 8);     
+    
+	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
+		printf("ERROR on binding");
+	
+	listen(sockfd, 5);
+	
+	clilen = sizeof(struct sockaddr_in);
+	if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
+		printf("ERROR on accept");
+	
+	write_payload_to_file("out.pdf", newsockfd);
+
+
+	int n = write(newsockfd,"I got your message", 18);
+	if (n < 0) 
+		printf("ERROR writing to socket");
+
+	close(newsockfd);
+	close(sockfd);
+
+	pthread_exit(NULL);
 }
