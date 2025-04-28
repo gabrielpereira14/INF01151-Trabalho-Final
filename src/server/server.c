@@ -108,6 +108,10 @@ int main() {
 		pthread_create(&receive_thread, NULL, receive, (void*)sock_push);
     }
     
+	close(sock_interface_listen);
+	close(sock_push_listen);
+	close(sock_receive_listen);
+
     return 0;
 }
 
