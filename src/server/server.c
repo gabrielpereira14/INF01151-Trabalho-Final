@@ -105,7 +105,7 @@ int main() {
 
 		pthread_create(&interface_thread, NULL, interface, (void*)sock_interface);
 		pthread_create(&push_thread, NULL, push, (void*)sock_push);
-		pthread_create(&receive_thread, NULL, receive, (void*)sock_push);
+		pthread_create(&receive_thread, NULL, receive, (void*)sock_receive);
     }
     
 	close(sock_interface_listen);
@@ -121,16 +121,22 @@ void perror_exit(const char *msg) {
 }
 
 // Recebe e executa os comandos do usuário
-void *interface(void* sock) {
-	return NULL;
+void *interface(void* arg) {
+	int sock = (int)arg;
+
+	pthread_exit(NULL);
 }
 
 // Envia os arquivos para o cliente
-void *push(void* sock) {
-	return NULL;
+void *push(void* arg) {
+	int sock = (int)arg;
+
+	pthread_exit(NULL);
 }
 
 // Recebe os arquivos do cliente
-void *receive(void* sock) {
-	return NULL;
+void *receive(void* arg) {
+	int sock = (int)arg;
+
+	pthread_exit(NULL);
 }
