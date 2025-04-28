@@ -7,6 +7,7 @@
 
 #define PACKET_HEADER_SIZE 10
 #define PAYLOAD_SIZE 236
+#define TEST_PORT 4003
 
 
 typedef struct packet{ 

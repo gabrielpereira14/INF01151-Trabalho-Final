@@ -177,7 +177,18 @@ int set_sync_dir_path(){
 }
 
 
-void *test_thread(void *arg){
+struct sockaddr_in setup_server_address(struct hostent *server, int port){
+    struct sockaddr_in sockaddr;
+    sockaddr.sin_family = AF_INET;     
+	sockaddr.sin_port = htons(port);    
+	sockaddr.sin_addr = *((struct in_addr *)server->h_addr);
+	bzero(&(sockaddr.sin_zero), 8);  
+
+    return sockaddr;
+}
+
+
+void *test_send_file(void *arg){
     int port = *((u_int16_t *) arg);
     free(arg);
     int sockfd, n;
@@ -225,17 +236,87 @@ void *test_thread(void *arg){
     pthread_exit(NULL);
 }
 
-
-
-int main(int argc, char** argv){ 
-    u_int16_t *port = malloc(sizeof(*port));
-    *port = 4000;
-    if(set_sync_dir_path() != 0){
+int connect_to_server(int *sockfd, struct hostent *server, int port, char *username){
+    
+    
+    if (((*sockfd) = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        fprintf(stderr, "ERRO abrindo o socket da interface\n");
         return 1;
     }
 
-    if(argc > 1){
-        *port = atoi(argv[1]);
+    struct sockaddr_in interface_serv_addr = setup_server_address(server, port);
+
+	if (connect((*sockfd),(struct sockaddr *) &interface_serv_addr,sizeof(interface_serv_addr)) < 0) {
+        fprintf(stderr,"ERRO conectando ao servidor\n");
+        return 1;
+    }
+
+	if (write((*sockfd), username, strlen(username)) < 0) {
+		fprintf(stderr, "ERRO mandando o pedido de coneccao para o servidor\n");
+        return 1;
+    }
+
+    int resposta;
+    if (read((*sockfd), &resposta, sizeof(resposta)) < 0) {
+		fprintf(stderr, "ERRO lendo a resposta do servidor\n");
+        return 1;
+    }
+
+    if (resposta != 1) {
+		fprintf(stderr, "ERRO server negou a coneccao\n");
+        
+    }
+
+    return 0;
+}
+
+
+
+int main(int argc, char* argv[]){ 
+    char *username;
+
+    if (argc >= 2) {
+       username = argv[1]; 
+    } else {
+        fprintf(stderr,"ERRO deve ser fornecido um nome de usuario\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(set_sync_dir_path() != 0){
+        return EXIT_FAILURE;
+    }
+
+    struct hostent *server;
+	if ((server = gethostbyname("localhost")) == NULL) {
+        fprintf(stderr,"ERRO servidor nao encontrado\n");
+        return 1;
+    }
+
+    int sock_interface;
+    if (connect_to_server(&sock_interface,server, 4000, username) != 0){
+        exit(EXIT_FAILURE);
+    }
+    
+
+    int sock_send, sock_receive;
+    if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        fprintf(stderr, "ERRO abrindo o socket se send\n");
+        exit(EXIT_FAILURE);
+    }
+    if ((sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        fprintf(stderr, "ERRO abrindo o socket de receive\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    struct sockaddr_in send_serv_addr = setup_server_address(server, 4001);
+    struct sockaddr_in receive_serv_addr = setup_server_address(server, 4002);
+	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
+        fprintf(stderr,"ERRO conectando ao servidor de receive\n");
+        exit(EXIT_FAILURE);
+    }
+	if (connect(sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
+        fprintf(stderr,"ERRO conectando ao servidor de send\n");
+        exit(EXIT_FAILURE);
     }
 
     pthread_t console_thread, file_watcher_thread, test_thread;
@@ -245,16 +326,18 @@ int main(int argc, char** argv){
 
 
 
+    u_int16_t *port = malloc(sizeof(*port));
+    *port = TEST_PORT;
+    if(argc >= 3){
+        *port = atoi(argv[2]);
+    }
 
-    pthread_create(&test_thread, NULL, connect_to_server, port);
+    pthread_create(&test_thread, NULL, test_send_file, port);
 
 
-
-
-
-    
 
     pthread_join(console_thread, NULL);
 
-    return 0;
+	close(sock_interface);
+    return EXIT_SUCCESS;
 }

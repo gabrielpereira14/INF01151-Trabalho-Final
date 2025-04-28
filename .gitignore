@@ -1,7 +1,7 @@
 *.o
 obj/
-client
-server
+/client
+/server
 **/sync_dir/
 in.*
 out.*
