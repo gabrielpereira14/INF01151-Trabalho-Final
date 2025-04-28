@@ -6,6 +6,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/inotify.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #include <errno.h>
 #include <linux/limits.h>
 
@@ -173,10 +176,93 @@ int set_sync_dir_path(){
 
 
 
-int main(){ 
+int main(int argc, char *argv[]) { 
+    char *username;
+
+    if (argc >= 2) {
+       username = argv[1]; 
+    } else {
+        fprintf(stderr,"ERRO deve ser fornecido um nome de usuario\n");
+        exit(EXIT_FAILURE);
+    }
 
     if(set_sync_dir_path() != 0){
-        return 1;
+        return EXIT_FAILURE;
+    }
+
+    int sock_interface;
+    struct sockaddr_in interface_serv_addr;
+    struct hostent *server;
+	
+	if ((server = gethostbyname("localhost")) == NULL) {
+        fprintf(stderr,"ERRO servidor nao encontrado\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if ((sock_interface = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        fprintf(stderr, "ERRO abrindo o socket da interface\n");
+        exit(EXIT_FAILURE);
+    }
+    
+	interface_serv_addr.sin_family = AF_INET;     
+	interface_serv_addr.sin_port = htons(4000);    
+	interface_serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+	bzero(&(interface_serv_addr.sin_zero), 8);     
+	
+    
+	if (connect(sock_interface,(struct sockaddr *) &interface_serv_addr,sizeof(interface_serv_addr)) < 0) {
+        fprintf(stderr,"ERRO conectando ao servidor\n");
+        exit(EXIT_FAILURE);
+    }
+
+	if (write(sock_interface, username, strlen(username)) < 0) {
+		fprintf(stderr, "ERRO mandando o pedido de coneccao para o servidor\n");
+        exit(EXIT_FAILURE);
+    }
+
+    int resposta;
+    if (read(sock_interface, &resposta, sizeof(resposta)) < 0) {
+		fprintf(stderr, "ERRO lendo a resposta do servidor\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (resposta != 1) {
+		fprintf(stderr, "ERRO server negou a coneccao\n");
+        exit(EXIT_FAILURE);
+    }
+
+    int sock_send, sock_receive;
+    struct sockaddr_in send_serv_addr, receive_serv_addr;
+	
+    if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        fprintf(stderr, "ERRO abrindo o socket se send\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        fprintf(stderr, "ERRO abrindo o socket de receive\n");
+        exit(EXIT_FAILURE);
+    }
+    
+	send_serv_addr.sin_family = AF_INET;     
+	send_serv_addr.sin_port = htons(4001);
+	send_serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+	bzero(&(interface_serv_addr.sin_zero), 8);     
+
+    receive_serv_addr.sin_family = AF_INET;     
+	receive_serv_addr.sin_port = htons(4002);    
+	receive_serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+	bzero(&(interface_serv_addr.sin_zero), 8);
+	
+    
+	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
+        fprintf(stderr,"ERRO conectando ao servidor de receive\n");
+        exit(EXIT_FAILURE);
+    }
+
+	if (connect(sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
+        fprintf(stderr,"ERRO conectando ao servidor de send\n");
+        exit(EXIT_FAILURE);
     }
 
     pthread_t console_thread, file_watcher_thread;
@@ -185,5 +271,6 @@ int main(){
 
     pthread_join(console_thread, NULL);
 
-    return 0;
+	close(sock_interface);
+    return EXIT_SUCCESS;
 }
