@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <signal.h>
 
 #define PORT_INTERFACE 4000
 #define PORT_PUSH 4001
@@ -14,14 +15,21 @@
 const int ANSWER_OK = 1;
 
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
-void *interface(void* sock); // Recebe e executa os comandos do usuário
-void *push(void* sock); // Envia os arquivos para o cliente
-void *receive(void* sock); // Recebe os arquivos do cliente
+void *interface(void* arg); // Recebe e executa os comandos do usuário
+void *push(void* arg); // Envia os arquivos para o cliente
+void *receive(void* arg); // Recebe os arquivos do cliente
+void termination(int sig);
+
+
+// Variáveis definidas globalmente para poderem ser fechadas na função de terminação
+// -1 sempre é um fd inválido, e pode ser fechado sem problemas
+int sock_interface_listen = -1, sock_push_listen = -1, sock_receive_listen = -1;
 
 int main() {
+	// Define a função de terminação do programa
+	signal(SIGINT, termination);
+
     // Cria os sockets de espera de conecção
-	int sock_interface_listen, sock_push_listen, sock_receive_listen;
-	
 	if ((sock_interface_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
         perror_exit("ERRO abrindo o socket de espera de coneccoes de interface: ");
 
@@ -108,9 +116,7 @@ int main() {
 		pthread_create(&receive_thread, NULL, receive, (void*)sock_receive);
     }
     
-	close(sock_interface_listen);
-	close(sock_push_listen);
-	close(sock_receive_listen);
+
 
     return 0;
 }
@@ -139,4 +145,14 @@ void *receive(void* arg) {
 	int sock = (int)arg;
 
 	pthread_exit(NULL);
+}
+
+void termination(int sig) {
+	close(sock_interface_listen);
+	close(sock_push_listen);
+	close(sock_receive_listen);
+
+	// TODO: fechar todas as sessões abertas
+
+	exit(EXIT_SUCCESS);
 }
