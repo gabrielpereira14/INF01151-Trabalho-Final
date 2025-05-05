@@ -177,7 +177,7 @@ int set_sync_dir_path(){
 }
 
 
-struct sockaddr_in setup_server_address(struct hostent *server, int port){
+struct sockaddr_in setup_socket_address(struct hostent *server, int port){
     struct sockaddr_in sockaddr;
     sockaddr.sin_family = AF_INET;     
 	sockaddr.sin_port = htons(port);    
@@ -244,7 +244,7 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
         return 1;
     }
 
-    struct sockaddr_in interface_serv_addr = setup_server_address(server, port);
+    struct sockaddr_in interface_serv_addr = setup_socket_address(server, port);
 
 	if (connect((*sockfd),(struct sockaddr *) &interface_serv_addr,sizeof(interface_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor\n");
@@ -308,8 +308,8 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     
-    struct sockaddr_in send_serv_addr = setup_server_address(server, 4001);
-    struct sockaddr_in receive_serv_addr = setup_server_address(server, 4002);
+    struct sockaddr_in send_serv_addr = setup_socket_address(server, 4001);
+    struct sockaddr_in receive_serv_addr = setup_socket_address(server, 4002);
 	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor de receive\n");
         exit(EXIT_FAILURE);
