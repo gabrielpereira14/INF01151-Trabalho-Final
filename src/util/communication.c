@@ -99,17 +99,30 @@ void print_packet(Packet packet) {
            packet._payload ? packet._payload : "");
 }
 
-Packet create_packet(const int16_t type,const uint16_t seqn,const uint32_t total_size,const uint16_t lenght, const char *payload){
+
+Packet create_data_packet(const uint16_t seqn,const uint32_t total_size,const uint16_t lenght, const char *payload){
     Packet packet;
     packet.seqn = seqn;
     packet.total_size = total_size;
+    packet.type = PACKET_DATA;
+    packet._payload = payload;
+    packet.length = lenght;
+
+    return packet;
+}
+
+Packet create_control_packet(const int type, const uint16_t lenght, const char *payload){
+    Packet packet;
+    packet.seqn = 0;
+    packet.total_size = 1;
     packet.type = type;
     packet._payload = payload;
     packet.length = lenght;
 
-
     return packet;
 }
+
+
 
 Packet read_packet(int newsockfd) {
     unsigned char header[PACKET_HEADER_SIZE];
@@ -156,24 +169,22 @@ Packet read_packet(int newsockfd) {
 }
 
 
-void write_payload_to_file(char *filename, int socket){
-	FILE *file = fopen(filename, "a+");
-	if(file == NULL)
-	{
-		printf("Error!");   
-		exit(1);             
-	}
+void write_payload_to_file(char *filename, int socket) {
+    remove(filename);
 
-	Packet packet;
-	do
-	{
-			packet = read_packet(socket);
-			print_packet(packet);
-			fwrite(packet._payload, packet.length, 1, file);
-			printf("%d\n", packet.seqn < packet.total_size - 1);
-	} while (packet.seqn < packet.total_size - 1);
-	
-	fclose(file);
+    FILE *file = fopen(filename, "a+");
+    if (file == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+
+    Packet packet;
+    do {
+        packet = read_packet(socket);
+        fwrite(packet._payload, packet.length, 1, file);
+    } while (packet.seqn < packet.total_size - 1);
+
+    fclose(file);
 }
 
 
@@ -186,40 +197,82 @@ size_t get_file_size(FILE *file_ptr){
     return file_size;
 }
 
+int send_packet(int sockfd, const Packet *packet){
+    size_t serialized_packet_len = 0;
+    unsigned char * serialized_packet = serialize_packet(packet, &serialized_packet_len);
 
-void send_file(const int sockfd, FILE *file_ptr){
+    if (!serialized_packet) return 0;
+
+    int n = write(sockfd, serialized_packet, serialized_packet_len);
+    
+    return n >= 0;
+}
+
+
+char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
+    char *buffer = malloc(chunk_size);
+    if (!buffer) return NULL;
+
+    *bytes_read = fread(buffer, 1, chunk_size, file);
+    if (*bytes_read < chunk_size && !feof(file)) {
+        free(buffer);
+        return NULL;
+    }
+
+    return buffer;
+}
+void send_file(const int sockfd, char *file_path){
+
+    FILE *file_ptr = fopen(file_path, "rb");
+    if(file_ptr == NULL)
+    {
+        printf("Error opening file!");   
+        exit(1);             
+    }
+
     size_t file_size = get_file_size(file_ptr);
 
     int total_packet_amount = (file_size + PAYLOAD_SIZE - 1) / PAYLOAD_SIZE;
-    printf("total_packets: %d\n", total_packet_amount);
     int current_packet = 0;
-    char buffer[PAYLOAD_SIZE];
 
     size_t total_bytes_read = 0;
     size_t bytes_read;
 
+    char *file_name = basename(file_path);
+    Packet control_packet = create_control_packet(PACKET_SEND, strlen(file_name), file_name);
+
+    if (!send_packet(sockfd, &control_packet)) {
+        fprintf(stderr, "ERROR sending control packet\n");
+        fclose(file_ptr);
+        return;
+    }
+
     do
     {
-        bytes_read = fread(buffer, 1, PAYLOAD_SIZE, file_ptr);
-        if (bytes_read < PAYLOAD_SIZE) {
-            if (!feof(file_ptr)) {
-                fprintf(stderr,"ERROR reading file\n");
-                exit(1);
-            } 
-            //memset(buffer + bytes_read, 0, PAYLOAD_SIZE - bytes_read);
-        }
-        Packet packet = create_packet(0,current_packet,total_packet_amount, bytes_read, buffer);
+        char *data = read_file_chunk(file_ptr, PAYLOAD_SIZE, &bytes_read);
+        Packet packet = create_data_packet(current_packet,total_packet_amount, bytes_read, data);
 
-        print_packet(packet);
-    
-        size_t serialized_packet_len = 0;
-        unsigned char * serialized_packet = serialize_packet(&packet, &serialized_packet_len);
-    
-        int n = write(sockfd, serialized_packet, serialized_packet_len);
-        if (n < 0) 
-            printf("ERROR writing to socket\n");
+        if (!send_packet(sockfd, &packet)) {
+            fprintf(stderr, "ERROR writing to socket\n");
+            free(data);
+            break;
+        }
+        free(data);
+        
         total_bytes_read += bytes_read;
         current_packet += 1;
     } while (total_bytes_read < file_size);
-    
+
+    fclose(file_ptr);
+}
+
+void receive_file(int socketfd, const char *path_to_save){
+    Packet packet = read_packet(socketfd);
+    char filename[packet.length + 1];
+    memcpy(filename, packet._payload, packet.length);
+    filename[packet.length] = '\0';
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s/%s", path_to_save, filename);  
+    printf("Received file %s from user %s\n", filename, "TODO");
+    write_payload_to_file(filepath,socketfd);
 }

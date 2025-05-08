@@ -38,4 +38,4 @@ $(OBJ_DIR)/util/%.o: $(SRC_DIR)/util/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(OBJ_DIR) $(CLIENT_BIN) $(SERVER_BIN) out.*
+	rm -rf $(OBJ_DIR) $(CLIENT_BIN) $(SERVER_BIN) out.* "user files"

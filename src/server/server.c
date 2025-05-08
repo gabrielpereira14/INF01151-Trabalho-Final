@@ -7,13 +7,17 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #include "../util/communication.h"
 
 #define PORT_INTERFACE 4000
-#define SERVER_PORT_SEND 4001
-#define SERVER_PORT_RECEIVE 4002
+#define SERVER_PORT_RECEIVE 4001
+#define SERVER_PORT_SEND 4002
 #define MAX_USERNAME_LENGTH 32
+
+#define USER_FILES_FOLDER "user files"
 const int ANSWER_OK = 1;
 
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
@@ -49,9 +53,11 @@ void *test_thread() {
 	clilen = sizeof(struct sockaddr_in);
 	if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
 		printf("ERROR on accept");
-	
-	write_payload_to_file("out.pdf", newsockfd);
 
+
+	create_folder_if_not_exists("./","teste");
+	receive_file(newsockfd, "./teste");
+ 
 
 	int n = write(newsockfd,"I got your message", 18);
 	if (n < 0) 
@@ -63,6 +69,28 @@ void *test_thread() {
 	pthread_exit(NULL);
 }
 
+int create_folder_if_not_exists(const char *path, const char *folder_name) {
+    char full_path[512];
+    snprintf(full_path, sizeof(full_path), "%s/%s", path, folder_name);
+
+    struct stat st;
+    if (stat(full_path, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+            return 0;
+        } else {
+            fprintf(stderr, "Error: %s exists but is not a directory\n", full_path);
+            return -1;
+        }
+    }
+
+    if (mkdir(full_path, 0755) != 0) {
+        perror("mkdir failed");
+        return -1;
+    }
+
+    return 0;
+}
+
 int main() {
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
@@ -70,6 +98,11 @@ int main() {
 
 	pthread_t test_thread_i;
 	pthread_create(&test_thread_i, NULL, test_thread, NULL);
+
+	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
+		fprintf(stderr, "Failed to create \"user files\" folder");
+	}
+
 
     // Cria os sockets de espera de conecção
 	if ((sock_interface_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
@@ -158,6 +191,11 @@ int main() {
 
 		// TODO: Guarda os dados da conecção
 
+
+		
+
+
+		
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
 
@@ -190,9 +228,17 @@ void *send_f(void* arg) {
 	pthread_exit(NULL);
 }
 
+
+
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
-	int sock = *((int *) arg);
+	int socketfd = *((int *) arg);
+
+	while (1)
+	{
+		receive_file(socketfd, USER_FILES_FOLDER);
+	}
+	
 
 	pthread_exit(NULL);
 }

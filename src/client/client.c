@@ -33,6 +33,64 @@ int create_sync_dir(){
     return 0;
 }
 
+int copy_file(const char *source_path, const char *dest_path) {
+    FILE *src = fopen(source_path, "rb");
+    if (src == NULL) {
+        perror("Error opening source file");
+        return 1;
+    }
+
+    FILE *dest = fopen(dest_path, "wb");
+    if (dest == NULL) {
+        perror("Error opening destination file");
+        fclose(src);
+        return 1;
+    }
+
+    char buffer[4096];
+    size_t bytes;
+
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, dest);
+    }
+
+    fclose(src);
+    fclose(dest);
+
+    return 0;
+}
+
+char *build_destination_path(const char *source_path) {
+    char *path_copy = strdup(source_path);
+    if (!path_copy) return NULL;
+
+    const char *file_name = basename(path_copy);
+
+    size_t len = strlen(sync_dir_path) + 1 + strlen(file_name) + 1;
+    char *full_path = malloc(len);
+    if (full_path) {
+        snprintf(full_path, len, "%s/%s", sync_dir_path, file_name);
+    }
+
+    free(path_copy);
+    return full_path;
+}
+
+int upload(const char *source_path){
+    char *dest_path = build_destination_path(source_path);
+    if (!dest_path) {
+        fprintf(stderr, "ERROR: Failed to construct destination path.\n");
+        return 1;
+    }
+
+    if (copy_file(source_path, dest_path) != 0) {
+        fprintf(stderr,"ERROR: File copy failed.\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 
 int get_command(char* command, char* arg)
 {
@@ -89,7 +147,11 @@ void *start_console_input_thread(){
         }
         else if (strcmp(command, "upload") == 0)
         {
-            printf("TODO: upload\n");
+            if (upload(path) != 0)
+            {
+                fprintf(stderr, "ERROR: Failed to upload file.");
+            }
+            
         }
         else if (strcmp(command, "delete") == 0)
         {
@@ -108,7 +170,8 @@ void *start_console_input_thread(){
     pthread_exit(0);
 }
 
-void *start_directory_watcher_thread() {
+void *start_directory_watcher_thread(void* arg) {
+    int socket = *(int*)arg;
     int fd, wd;
     char buffer[EVENT_BUF_LEN];
 
@@ -125,8 +188,6 @@ void *start_directory_watcher_thread() {
         wd = inotify_add_watch(fd, sync_dir_path, IN_CREATE | IN_CLOSE_WRITE);
     }while(wd < 0);
   
-
-    //printf("Watching '%s' for IN_CREATE and IN_CLOSE_WRITE...\n", sync_dir_path);
 
     while (1) {
         ssize_t length = read(fd, buffer, EVENT_BUF_LEN);
@@ -145,12 +206,18 @@ void *start_directory_watcher_thread() {
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
 
+            int path_size = strlen(sync_dir_path) + strlen(event->name) + 2;
+            char event_file_path[path_size];
+
+            snprintf(event_file_path, path_size, "%s/%s", sync_dir_path, event->name);
+
+            
             if (event->mask & IN_CREATE) {
-                //printf("IN_CREATE: %s\n", event->name);
+                send_file(socket, event_file_path);
             }
 
             if (event->mask & IN_CLOSE_WRITE) {
-                //printf("IN_CLOSE_WRITE: %s\n", event->name);
+                send_file(socket, event_file_path);
             }
 
             i += sizeof(struct inotify_event) + event->len;
@@ -218,13 +285,8 @@ void *test_send_file(void *arg){
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         printf("ERROR connecting\n");
 
-    FILE *file_ptr = fopen("in.pdf", "rb");
-    if(file_ptr == NULL)
-    {
-        printf("Error opening file!");   
-        exit(1);             
-    }
-    send_file(sockfd,file_ptr);
+    
+    send_file(sockfd,"in.pdf");
     bzero(buffer,256);
     n = read(sockfd, buffer, 256);
     if (n < 0) 
@@ -321,7 +383,7 @@ int main(int argc, char* argv[]){
 
     pthread_t console_thread, file_watcher_thread, test_thread;
     pthread_create(&console_thread, NULL, start_console_input_thread, NULL);
-    pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, NULL);
+    pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
 
 
 
