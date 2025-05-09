@@ -5,6 +5,7 @@ typedef int Value;
 typedef char *Key;
 
 typedef struct node {
+    Key key;
     Value value;
     struct node *next;
 } Node;
@@ -12,11 +13,11 @@ typedef struct node {
 typedef Node *LinkedList;
 
 const LinkedList EMPTY_LINKED_LIST;
-void push(LinkedList *list, Value value);
+void push(LinkedList *list, Key key, Value value);
 
 typedef struct {
     size_t size;
-    LinkedList array[];
+    LinkedList *array;
 } HashTable;
 
 HashTable newHashTable(size_t size);
