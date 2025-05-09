@@ -12,7 +12,7 @@ typedef struct node {
 typedef Node *LinkedList;
 
 const LinkedList EMPTY_LINKED_LIST;
-void push(LinkedList list, Value);
+void push(LinkedList *list, Value value);
 
 typedef struct {
     size_t size;
