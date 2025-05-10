@@ -13,15 +13,15 @@ typedef struct node {
 typedef Node *LinkedList;
 
 const LinkedList EMPTY_LINKED_LIST;
-void push(LinkedList *list, Key key, Value value);
+void LinkedList_push(LinkedList *list, Key key, Value value);
 
 typedef struct {
     size_t size;
     LinkedList *array;
 } HashTable;
 
-HashTable newHashTable(size_t size);
+HashTable HashTable_create(size_t size);
 // Consome o buffer de key, um novo string deve ser alocado
 // para inserir
-void insertCell(HashTable table, Key key, Value value);
-Value *getCell(HashTable table, Key key);
+void HashTable_insert(HashTable table, Key key, Value value);
+Value *HashTable_search(HashTable table, Key key);
