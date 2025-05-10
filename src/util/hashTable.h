@@ -21,5 +21,7 @@ typedef struct {
 } HashTable;
 
 HashTable newHashTable(size_t size);
+// Consome o buffer de key, um novo string deve ser alocado
+// para inserir
 void insertCell(HashTable table, Key key, Value value);
 Value *getCell(HashTable table, Key key);

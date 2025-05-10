@@ -1,6 +1,7 @@
-#include <hashTable.h>
+#include "hashTable.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 void push(LinkedList *list, Key key, Value value) {
     if (list == NULL)
@@ -17,7 +18,7 @@ void push(LinkedList *list, Key key, Value value) {
 HashTable newHashTable(size_t size) {
     HashTable result = {.size = size, .array = malloc(sizeof(LinkedList)*size)};
 
-    memset(result.array, EMPTY_LINKED_LIST, size);
+    memset(result.array, (int) EMPTY_LINKED_LIST, size);
 
     return result;
 }
