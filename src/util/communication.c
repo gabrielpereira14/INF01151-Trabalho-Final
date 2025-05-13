@@ -2,7 +2,10 @@
 #include "communication.h"
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size){
-    if (!pkt || !pkt->_payload || pkt->length == 0) return NULL;
+    if (!pkt || ((!pkt->_payload || pkt->length == 0 ) && pkt->type != PACKET_DATA)){
+        printf("Invalid packet for serialization");
+        return NULL;
+    }
 
     size_t total_size = sizeof(uint16_t) * 3 + sizeof(uint32_t) + pkt->length;
     uint8_t* buffer = (uint8_t*)malloc(total_size);
@@ -138,7 +141,6 @@ Packet read_packet(int newsockfd) {
         }
         total_read += n;
     }
-
     uint16_t payload_length = header[8] | (header[9] << 8);
     size_t total_packet_size = PACKET_HEADER_SIZE + payload_length;
 
@@ -171,10 +173,12 @@ Packet read_packet(int newsockfd) {
 
 void write_payload_to_file(char *filename, int socket) {
     remove(filename);
+    
 
     FILE *file = fopen(filename, "a+");
     if (file == NULL) {
         printf("Error opening file!\n");
+        printf("\n%s",filename);
         exit(1);
     }
 
@@ -273,6 +277,20 @@ void receive_file(int socketfd, const char *path_to_save){
     filename[packet.length] = '\0';
     char filepath[512];
     snprintf(filepath, sizeof(filepath), "%s/%s", path_to_save, filename);  
-    printf("Received file %s from user %s\n", filename, "TODO");
     write_payload_to_file(filepath,socketfd);
+}
+
+
+Context *create_context(int socketfd, char *username){
+    Context *ctx = malloc(sizeof(Context));
+    ctx->username = malloc(strlen(username) + 1);
+    strcpy(ctx->username,username);
+    ctx->socketfd = socketfd;
+
+    return ctx;
+}
+
+void free_context(Context *ctx){
+    free(ctx->username);
+    free(ctx);
 }
