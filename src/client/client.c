@@ -108,9 +108,24 @@ int get_command(char* command, char* arg)
     return OK;
 }
 
+void list_server(int socketfd){
+    char *dummy = "dummy";
+    Packet control_packet = create_control_packet(PACKET_LIST, 6, dummy);
+
+    if (!send_packet(socketfd, &control_packet)) {
+        fprintf(stderr, "ERROR sending control packet\n");
+        return;
+    }
+
+    Packet packet = read_packet(socketfd);
+
+    fprintf(stderr, "%s\n", packet._payload);
+}
 
 
-void *start_console_input_thread(){
+
+void *start_console_input_thread(void *arg){
+    int socketfd = *((int*) arg);
     char command[MAX_COMMAND] = "\0";
     char path[MAX_ARGUMENT] = "\0";
 
@@ -138,12 +153,13 @@ void *start_console_input_thread(){
             create_sync_dir();
         }
         else if (strcmp(command, "list_client") == 0)
-        {
+        {   
+
             printf("TODO: list_client\n");
         }
         else if (strcmp(command, "list_server") == 0)
         {
-            printf("TODO: list_server\n");
+            list_server(socketfd);
         }
         else if (strcmp(command, "upload") == 0)
         {
@@ -151,15 +167,16 @@ void *start_console_input_thread(){
             {
                 fprintf(stderr, "ERROR: Failed to upload file.");
             }
-            
         }
         else if (strcmp(command, "delete") == 0)
         {
             printf("TODO: delete\n");
+
         }
         else if (strcmp(command, "download") == 0)
         {
             printf("TODO: download\n");
+
         }
         else
         {
@@ -299,8 +316,6 @@ void *test_send_file(void *arg){
 }
 
 int connect_to_server(int *sockfd, struct hostent *server, int port, char *username){
-    
-    
     if (((*sockfd) = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         fprintf(stderr, "ERRO abrindo o socket da interface\n");
         return 1;
@@ -332,8 +347,6 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
     return 0;
 }
 
-
-
 int main(int argc, char* argv[]){ 
     char *username;
 
@@ -359,7 +372,6 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     
-
     int sock_send, sock_receive;
     if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         fprintf(stderr, "ERRO abrindo o socket se send\n");
@@ -382,11 +394,8 @@ int main(int argc, char* argv[]){
     }
 
     pthread_t console_thread, file_watcher_thread, test_thread;
-    pthread_create(&console_thread, NULL, start_console_input_thread, NULL);
+    pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
-
-
-
 
     u_int16_t *port = malloc(sizeof(*port));
     *port = TEST_PORT;

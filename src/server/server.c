@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <dirent.h>
 
 #include "../util/communication.h"
 
@@ -30,6 +31,28 @@ void termination(int sig);
 // Variáveis definidas globalmente para poderem ser fechadas na função de terminação
 // -1 sempre é um fd inválido, e pode ser fechado sem problemas
 int sock_interface_listen = -1, sock_send_listen = -1, sock_receive_listen = -1;
+
+int create_folder_if_not_exists(const char *path, const char *folder_name) {
+    char full_path[512];
+    snprintf(full_path, sizeof(full_path), "%s/%s", path, folder_name);
+
+    struct stat st;
+    if (stat(full_path, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+            return 0;
+        } else {
+            fprintf(stderr, "Error: %s exists but is not a directory\n", full_path);
+            return -1;
+        }
+    }
+
+    if (mkdir(full_path, 0755) != 0) {
+        perror("mkdir failed");
+        return -1;
+    }
+
+    return 0;
+}
 
 void *test_thread() {
 	int sockfd, newsockfd;
@@ -69,32 +92,9 @@ void *test_thread() {
 	pthread_exit(NULL);
 }
 
-int create_folder_if_not_exists(const char *path, const char *folder_name) {
-    char full_path[512];
-    snprintf(full_path, sizeof(full_path), "%s/%s", path, folder_name);
-
-    struct stat st;
-    if (stat(full_path, &st) == 0) {
-        if (S_ISDIR(st.st_mode)) {
-            return 0;
-        } else {
-            fprintf(stderr, "Error: %s exists but is not a directory\n", full_path);
-            return -1;
-        }
-    }
-
-    if (mkdir(full_path, 0755) != 0) {
-        perror("mkdir failed");
-        return -1;
-    }
-
-    return 0;
-}
-
 int main() {
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
-
 
 	pthread_t test_thread_i;
 	pthread_create(&test_thread_i, NULL, test_thread, NULL);
@@ -102,7 +102,6 @@ int main() {
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
 	}
-
 
     // Cria os sockets de espera de conecção
 	if ((sock_interface_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
@@ -185,23 +184,26 @@ int main() {
 		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
 		    perror_exit("ERRO aceitando a coneccao de send: ");
 
-		listen(sock_receive,5);
+		listen(sock_receive_listen,5);
 		if ((sock_receive = accept(sock_receive_listen, (struct sockaddr *) &cli_receive_addr, &cli_receive_addr_len)) == -1) 
 		    perror_exit("ERRO aceitando a coneccao de receive: ");
 
 		// TODO: Guarda os dados da conecção
 
-
-		
-
-
 		
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
 
-		pthread_create(&interface_thread, NULL, interface, &sock_interface);
+		Context *ctx_interface = create_context(sock_interface, request);
+		Context *ctx_receive = create_context(sock_receive, request);
+
+
+		pthread_create(&interface_thread, NULL, interface, ctx_interface);
 		pthread_create(&send_thread, NULL, send_f, &sock_send);
-		pthread_create(&receive_thread, NULL, receive, &sock_receive);
+		pthread_create(&receive_thread, NULL, receive, ctx_receive);
+
+		free_context(ctx_interface);
+		free_context(ctx_receive);
     }
     
 
@@ -214,32 +216,131 @@ void perror_exit(const char *msg) {
 	exit(EXIT_FAILURE);
 }
 
+int receive_command(int socketfd){
+	Packet packet = read_packet(socketfd);
+	fprintf(stderr, "leu o pacote\n");
+	return packet.type;
+}
+
+char *get_user_folder(char *username){
+    size_t len = strlen(USER_FILES_FOLDER) + strlen(username) + 2;
+
+    char *path = malloc(len);
+    if (path == NULL) {
+        perror("malloc");
+        return NULL;
+    }
+
+    snprintf(path, len, "%s/%s", USER_FILES_FOLDER, username);
+
+	return path;
+}
+
+char* list_files(const char *folder_path) {
+    struct dirent *entry;
+    DIR *dir = opendir(folder_path);
+    if (dir == NULL) {
+        perror("opendir");
+        return NULL;
+    }
+
+    size_t buffer_size = 1024;
+    char *result = malloc(buffer_size);
+    if (result == NULL) {
+        perror("malloc");
+        closedir(dir);
+        return NULL;
+    }
+    result[0] = '\0';
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.' && 
+           (entry->d_name[1] == '\0' || 
+           (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
+            continue;
+        }
+
+        size_t needed = strlen(result) + strlen(entry->d_name) + 2;
+        if (needed > buffer_size) {
+            buffer_size *= 2;
+            char *new_result = realloc(result, buffer_size);
+            if (new_result == NULL) {
+                perror("realloc");
+                free(result);
+                closedir(dir);
+                return NULL;
+            }
+            result = new_result;
+        }
+
+        strcat(result, entry->d_name);
+        strcat(result, "\n");
+    }
+
+    closedir(dir);
+    return result;
+}
+
 // Recebe e executa os comandos do usuário
 void *interface(void* arg) {
-	int sock = *((int *) arg);
+	Context ctx = *((Context *) arg);
+
+	while (1)
+	{
+		int command = receive_command(ctx.socketfd);
+
+		fprintf(stderr, "Command: %d\n", command);
+
+		switch (command)
+		{
+		case PACKET_LIST:
+			char *folder_path = get_user_folder(ctx.username);
+			char *files = list_files(folder_path);
+			
+			fprintf(stderr, "%s\n", files);
+			Packet packet = create_data_packet(0,1,strlen(files),files);
+			if(!send_packet(ctx.socketfd,&packet)){
+				free(folder_path);
+				free(files);
+				exit(2);
+			}
+
+			free(folder_path);
+			free(files);
+			break;
+		
+		default:
+			break;
+		}
+	}
+	
+
 
 	pthread_exit(NULL);
 }
 
 // Envia os arquivos para o cliente
 void *send_f(void* arg) {
-	int sock = *((int *) arg);
-
+	int socketfd = *((int *) arg);
+		
 	pthread_exit(NULL);
 }
 
-
-
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
-	int socketfd = *((int *) arg);
-
+	Context ctx = *((Context *) arg);
+	
 	while (1)
 	{
-		receive_file(socketfd, USER_FILES_FOLDER);
-	}
-	
+		char *folder_path = get_user_folder(ctx.username);
 
+		printf("%s", folder_path);
+
+		create_folder_if_not_exists(USER_FILES_FOLDER,ctx.username);
+		receive_file(ctx.socketfd, folder_path);
+
+		free(folder_path);
+	}
 	pthread_exit(NULL);
 }
 
