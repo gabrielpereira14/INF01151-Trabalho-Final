@@ -2,7 +2,7 @@
 #include "communication.h"
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size){
-    if (!pkt || !pkt->_payload || pkt->length == 0){
+    if (!pkt || ((!pkt->_payload || pkt->length == 0 ) && pkt->type != PACKET_DATA)){
         printf("Invalid packet for serialization");
         return NULL;
     }
@@ -283,7 +283,7 @@ void receive_file(int socketfd, const char *path_to_save){
 
 Context *create_context(int socketfd, char *username){
     Context *ctx = malloc(sizeof(Context));
-    ctx->username = malloc(strlen(username));
+    ctx->username = malloc(strlen(username) + 1);
     strcpy(ctx->username,username);
     ctx->socketfd = socketfd;
 

@@ -202,6 +202,10 @@ int main() {
 		pthread_create(&send_thread, NULL, send_f, &sock_send);
 		pthread_create(&receive_thread, NULL, receive, ctx_receive);
 
+		pthread_join(interface_thread, NULL);
+		pthread_join(send_thread, NULL);
+		pthread_join(receive_thread, NULL);
+
 		free_context(ctx_interface);
 		free_context(ctx_receive);
     }
@@ -218,7 +222,6 @@ void perror_exit(const char *msg) {
 
 int receive_command(int socketfd){
 	Packet packet = read_packet(socketfd);
-	fprintf(stderr, "leu o pacote\n");
 	return packet.type;
 }
 
@@ -260,7 +263,7 @@ char* list_files(const char *folder_path) {
             continue;
         }
 
-        size_t needed = strlen(result) + strlen(entry->d_name) + 2;
+        size_t needed = strlen(result) + strlen(entry->d_name) + 4;
         if (needed > buffer_size) {
             buffer_size *= 2;
             char *new_result = realloc(result, buffer_size);
@@ -273,6 +276,7 @@ char* list_files(const char *folder_path) {
             result = new_result;
         }
 
+		strcat(result, "  ");
         strcat(result, entry->d_name);
         strcat(result, "\n");
     }
@@ -289,20 +293,22 @@ void *interface(void* arg) {
 	{
 		int command = receive_command(ctx.socketfd);
 
-		fprintf(stderr, "Command: %d\n", command);
+		//fprintf(stderr, "Command: %d\n", command);
 
 		switch (command)
 		{
 		case PACKET_LIST:
 			char *folder_path = get_user_folder(ctx.username);
 			char *files = list_files(folder_path);
-			
-			fprintf(stderr, "%s\n", files);
-			Packet packet = create_data_packet(0,1,strlen(files),files);
+
+			int seqn = 0;
+			int total_packets = 1;
+			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
+
 			if(!send_packet(ctx.socketfd,&packet)){
+				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
 				free(files);
-				exit(2);
 			}
 
 			free(folder_path);
@@ -313,8 +319,6 @@ void *interface(void* arg) {
 			break;
 		}
 	}
-	
-
 
 	pthread_exit(NULL);
 }

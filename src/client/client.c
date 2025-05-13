@@ -109,17 +109,17 @@ int get_command(char* command, char* arg)
 }
 
 void list_server(int socketfd){
-    char *dummy = "dummy";
-    Packet control_packet = create_control_packet(PACKET_LIST, 6, dummy);
+    char *dummy = "";
+    Packet control_packet = create_control_packet(PACKET_LIST, 1, dummy);
 
     if (!send_packet(socketfd, &control_packet)) {
-        fprintf(stderr, "ERROR sending control packet\n");
+        fprintf(stderr, "ERROR sending control packet (list_server)\n");
         return;
     }
 
     Packet packet = read_packet(socketfd);
 
-    fprintf(stderr, "%s\n", packet._payload);
+    fprintf(stderr, "Server files: \n%s\n", packet._payload);
 }
 
 
@@ -139,47 +139,34 @@ void *start_console_input_thread(void *arg){
 
         get_command(command,path);
 
-        //printf("Command: %s, Argument: %s\n", command, path);
         
-        if (strcmp(command, "exit") == 0)
-        {
+        if (strcmp(command, "exit") == 0){
             printf("Client closed\n");
             break;
         }
-        else if (strcmp(command, "get_sync_dir") == 0)
-        {
-            //Tem que ver se tem no server antes de criar
-
+        else if (strcmp(command, "get_sync_dir") == 0){
             create_sync_dir();
         }
-        else if (strcmp(command, "list_client") == 0)
-        {   
-
+        else if (strcmp(command, "list_client") == 0){   
             printf("TODO: list_client\n");
         }
-        else if (strcmp(command, "list_server") == 0)
-        {
+        else if (strcmp(command, "list_server") == 0){
             list_server(socketfd);
         }
-        else if (strcmp(command, "upload") == 0)
-        {
+        else if (strcmp(command, "upload") == 0){
             if (upload(path) != 0)
             {
                 fprintf(stderr, "ERROR: Failed to upload file.");
             }
         }
-        else if (strcmp(command, "delete") == 0)
-        {
+        else if (strcmp(command, "delete") == 0){
             printf("TODO: delete\n");
 
         }
-        else if (strcmp(command, "download") == 0)
-        {
+        else if (strcmp(command, "download") == 0){
             printf("TODO: download\n");
-
         }
-        else
-        {
+        else{
             printf("Unknown command: %s\n", command);
         }
       
@@ -404,8 +391,6 @@ int main(int argc, char* argv[]){
     }
 
     pthread_create(&test_thread, NULL, test_send_file, port);
-
-
 
     pthread_join(console_thread, NULL);
 
