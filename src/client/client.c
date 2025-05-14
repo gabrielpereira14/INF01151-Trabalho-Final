@@ -129,7 +129,7 @@ void *start_console_input_thread(void *arg){
     char command[MAX_COMMAND] = "\0";
     char path[MAX_ARGUMENT] = "\0";
 
-    printf("Client started!");
+    printf("Client started!\n");
 
 
     while (strcmp(command, "exit") != 0)
@@ -336,6 +336,7 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
 
 int main(int argc, char* argv[]){ 
     char *username;
+    uint16_t console_socket_port = 4000;
 
     if (argc >= 2) {
        username = argv[1]; 
@@ -343,6 +344,14 @@ int main(int argc, char* argv[]){
         fprintf(stderr,"ERRO deve ser fornecido um nome de usuario\n");
         exit(EXIT_FAILURE);
     }
+
+    if(argc >= 3){
+        console_socket_port = atoi(argv[2]);
+    }
+
+    uint16_t send_socket_port = console_socket_port + 1;
+    uint16_t receive_socket_port = console_socket_port + 2;
+
 
     if(set_sync_dir_path() != 0){
         return EXIT_FAILURE;
@@ -355,7 +364,7 @@ int main(int argc, char* argv[]){
     }
 
     int sock_interface;
-    if (connect_to_server(&sock_interface,server, 4000, username) != 0){
+    if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
         exit(EXIT_FAILURE);
     }
     
@@ -369,8 +378,8 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     
-    struct sockaddr_in send_serv_addr = setup_socket_address(server, 4001);
-    struct sockaddr_in receive_serv_addr = setup_socket_address(server, 4002);
+    struct sockaddr_in send_serv_addr = setup_socket_address(server, send_socket_port);
+    struct sockaddr_in receive_serv_addr = setup_socket_address(server, receive_socket_port);
 	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor de receive\n");
         exit(EXIT_FAILURE);
@@ -383,12 +392,9 @@ int main(int argc, char* argv[]){
     pthread_t console_thread, file_watcher_thread, test_thread;
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
-
+    
     u_int16_t *port = malloc(sizeof(*port));
     *port = TEST_PORT;
-    if(argc >= 3){
-        *port = atoi(argv[2]);
-    }
 
     pthread_create(&test_thread, NULL, test_send_file, port);
 

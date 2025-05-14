@@ -13,9 +13,6 @@
 
 #include "../util/communication.h"
 
-#define PORT_INTERFACE 4000
-#define SERVER_PORT_RECEIVE 4001
-#define SERVER_PORT_SEND 4002
 #define MAX_USERNAME_LENGTH 32
 
 #define USER_FILES_FOLDER "user files"
@@ -116,34 +113,50 @@ int main() {
     // Faz bind nos ports
 	struct sockaddr_in interface_serv_addr, send_serv_addr, receive_serv_addr;
 
+	uint16_t interface_socket_port = 4000;
+	
+
     interface_serv_addr.sin_family = AF_INET;
-	interface_serv_addr.sin_port = htons(PORT_INTERFACE);
+	interface_serv_addr.sin_port = htons(interface_socket_port);
 	interface_serv_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(interface_serv_addr.sin_zero), 8);
 
-    send_serv_addr.sin_family = AF_INET;
-    send_serv_addr.sin_port = htons(SERVER_PORT_SEND);
-    send_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    bzero(&(send_serv_addr.sin_zero), 8);
+   
+
+    while ( bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
+		interface_socket_port =(rand() % 30000) + 2000; 
+	}
+
+	fprintf(stderr, "Server running on port %d\n", interface_socket_port);
+
+	
+	uint16_t receive_socket_port = interface_socket_port + 1;
+	uint16_t send_socket_port = interface_socket_port + 2;
+
 
 	receive_serv_addr.sin_family = AF_INET;
-    receive_serv_addr.sin_port = htons(SERVER_PORT_RECEIVE);
+    receive_serv_addr.sin_port = htons(receive_socket_port);
     receive_serv_addr.sin_addr.s_addr = INADDR_ANY;
     bzero(&(receive_serv_addr.sin_zero), 8);
 
-    if (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0) 
-		perror_exit("ERRO vinculando o socket de espera de coneccoes pela interface: ");
+	send_serv_addr.sin_family = AF_INET;
+    send_serv_addr.sin_port = htons(send_socket_port);
+    send_serv_addr.sin_addr.s_addr = INADDR_ANY;
+    bzero(&(send_serv_addr.sin_zero), 8);
 
-	if (bind(sock_send_listen, (struct sockaddr *) &send_serv_addr, sizeof(send_serv_addr)) < 0) 
-		perror_exit("ERRO vinulando o socket de espera da coneccao de send: ");
-		
-	if (bind(sock_receive_listen, (struct sockaddr *) &receive_serv_addr, sizeof(receive_serv_addr)) < 0) 
+	if (bind(sock_receive_listen, (struct sockaddr *) &receive_serv_addr, sizeof(receive_serv_addr)) < 0){ 
 			perror_exit("ERRO vinulando o socket de espera da coneccao de receive: ");
+	}
+
+	if (bind(sock_send_listen, (struct sockaddr *) &send_serv_addr, sizeof(send_serv_addr)) < 0){ 
+		perror_exit("ERRO vinulando o socket de espera da coneccao de send: ");
+	}
 	
 	// Começa a esperar pedidos de conecção
 	listen(sock_interface_listen, 5);
-	listen(sock_send_listen, 1);
 	listen(sock_receive_listen, 1);
+	listen(sock_send_listen, 1);
+	
 
     while (1) {
         // Espera uma requisição de conecção
@@ -179,17 +192,15 @@ int main() {
 		struct sockaddr_in cli_send_addr, cli_receive_addr;
     	socklen_t cli_send_addr_len = sizeof(struct sockaddr_in);
 		socklen_t cli_receive_addr_len = sizeof(struct sockaddr_in);
-		listen(sock_send_listen,5);
+		
 		// Aceita as conecções
-		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de send: ");
-
 		listen(sock_receive_listen,5);
 		if ((sock_receive = accept(sock_receive_listen, (struct sockaddr *) &cli_receive_addr, &cli_receive_addr_len)) == -1) 
 		    perror_exit("ERRO aceitando a coneccao de receive: ");
 
-		// TODO: Guarda os dados da conecção
-
+		listen(sock_send_listen,5);
+		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
+		    perror_exit("ERRO aceitando a coneccao de send: ");
 		
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
