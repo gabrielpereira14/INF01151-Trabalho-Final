@@ -1,9 +1,9 @@
 
 #include "communication.h"
 
-unsigned char* serialize_packet(const Packet* pkt, size_t* out_size){
-    if (!pkt || ((!pkt->_payload || pkt->length == 0 ) && pkt->type != PACKET_DATA)){
-        printf("Invalid packet for serialization");
+unsigned char* serialize_packet(const Packet* pkt, size_t* out_size) {
+    if (!pkt || (pkt->length > 0 && !pkt->_payload)) {
+        printf("Invalid packet for serialization\n");
         return NULL;
     }
 
@@ -31,13 +31,14 @@ unsigned char* serialize_packet(const Packet* pkt, size_t* out_size){
     buffer[offset++] = pkt->length & 0xFF;
     buffer[offset++] = (pkt->length >> 8) & 0xFF;
 
-    // Write payload
-    memcpy(buffer + offset, pkt->_payload, pkt->length);
-    offset += pkt->length;
+    // Write payload (se existir)
+    if (pkt->length > 0) {
+        memcpy(buffer + offset, pkt->_payload, pkt->length);
+        offset += pkt->length;
+    }
 
     if (out_size) *out_size = offset;
     return buffer;
-
 }
 
 Packet deserialize_packet(unsigned char *serialized_packet, size_t packet_size){
