@@ -11,6 +11,8 @@
 #include <linux/limits.h>
 #include <netinet/in.h>
 #include <netdb.h> 
+#include <dirent.h>
+#include <time.h>
 
 #include "../util/communication.h"
 
@@ -122,7 +124,84 @@ void list_server(int socketfd){
     fprintf(stderr, "Server files: \n%s\n", packet._payload);
 }
 
+void list_client() {
+    DIR *dir = opendir(sync_dir_path);
+    if (!dir) {
+        perror("ERROR opening sync_dir");
+        return;
+    }
 
+    struct dirent *entry;
+    struct stat info;
+    char path[PATH_MAX];
+    char time_str[20];
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.' && 
+           (entry->d_name[1] == '\0' || 
+           (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
+            continue;
+        }
+
+        snprintf(path, sizeof(path), "%s/%s", sync_dir_path, entry->d_name);
+        if (stat(path, &info) == 0) {
+            printf("\nFile: %s\n", entry->d_name);
+
+            strftime(time_str, sizeof(time_str), "%d/%m/%Y %H:%M:%S", localtime(&info.st_mtime));
+            printf("    Modification time: %s\n", time_str);
+
+            strftime(time_str, sizeof(time_str), "%d/%m/%Y %H:%M:%S", localtime(&info.st_atime));
+            printf("          Access time: %s\n", time_str);
+
+            strftime(time_str, sizeof(time_str), "%d/%m/%Y %H:%M:%S", localtime(&info.st_ctime));
+            printf(" Change/creation time: %s\n\n", time_str);
+        }
+    }
+
+    closedir(dir);
+}
+
+void download(const char *filename, int socketfd) {
+    //printf("Download do arquivo: %s\n", filename);
+
+    // Envia o comando para sinalizar um download
+    Packet command = create_control_packet(PACKET_DOWNLOAD, 0, NULL);
+    if (!send_packet(socketfd, &command)) {
+        fprintf(stderr, "ERROR sending download command\n");
+        return;
+    }
+
+    // Envia o nome do arquivo requisitado
+    Packet name = create_control_packet(PACKET_SEND, strlen(filename), filename);
+    if (!send_packet(socketfd, &name)) {
+        fprintf(stderr, "ERROR sending file name\n");
+        return;
+    }
+
+    // SAlva o arquivo no diretorio atual
+    receive_file(socketfd, ".");
+    printf("Arquivo '%s' salvo.\n", filename);
+}
+
+void delete(const char *filename, int socketfd) {
+    //printf("Exclusão do arquivo: %s\n", filename);
+
+    // Envia o comando para sinalizar a exclusao
+    Packet command = create_control_packet(PACKET_DELETE, 0, NULL);
+    if (!send_packet(socketfd, &command)) {
+        fprintf(stderr, "ERROR sending delete command\n");
+        return;
+    }
+
+    // Envia o nome do arquivo a ser deletado
+    Packet name = create_control_packet(PACKET_SEND, strlen(filename), filename);
+    if (!send_packet(socketfd, &name)) {
+        fprintf(stderr, "ERROR sending file name\n");
+        return;
+    }
+
+    printf("Exclusão solicitada.\n");
+}
 
 void *start_console_input_thread(void *arg){
     int socketfd = *((int*) arg);
@@ -148,7 +227,7 @@ void *start_console_input_thread(void *arg){
             create_sync_dir();
         }
         else if (strcmp(command, "list_client") == 0){   
-            printf("TODO: list_client\n");
+            list_client();
         }
         else if (strcmp(command, "list_server") == 0){
             list_server(socketfd);
@@ -160,11 +239,10 @@ void *start_console_input_thread(void *arg){
             }
         }
         else if (strcmp(command, "delete") == 0){
-            printf("TODO: delete\n");
-
+            delete(path, socketfd);
         }
         else if (strcmp(command, "download") == 0){
-            printf("TODO: download\n");
+            download(path, socketfd);
         }
         else{
             printf("Unknown command: %s\n", command);
