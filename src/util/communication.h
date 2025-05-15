@@ -12,7 +12,7 @@
 #define TEST_PORT 4003
 
 enum PacketTypes{
-    PACKET_DATA, PACKET_SEND, PACKET_LIST,
+    PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE
 };
 
 typedef struct packet{ 

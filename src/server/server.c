@@ -325,6 +325,59 @@ void *interface(void* arg) {
 			free(folder_path);
 			free(files);
 			break;
+
+		case PACKET_DOWNLOAD: {
+			//printf("DOWNLOAD requisitado\n");
+
+    		Packet packet = read_packet(ctx.socketfd);
+    		if (packet.length == 0 || !packet._payload) {
+        		fprintf(stderr, "ERROR invalid file name.\n");
+        		break;
+    		}
+
+    		printf("Requested file: '%.*s'\n", packet.length, packet._payload);
+
+    		char *folder = get_user_folder(ctx.username);
+    		char filepath[512];
+    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
+
+    		if (access(filepath, F_OK) != 0) {
+        		fprintf(stderr, "ERROR file not found: %s\n", filepath);
+        		free(folder);
+        		break;
+    		}
+
+    		printf("Sending file: %s\n", filepath);
+    		send_file(ctx.socketfd, filepath);
+
+    		free(folder);
+    		break;
+		}
+
+		case PACKET_DELETE: {
+    		//printf("DELETE requisitado\n");
+			
+    		Packet packet = read_packet(ctx.socketfd);
+    		if (packet.length == 0 || !packet._payload) {
+        		fprintf(stderr, "ERROR invalid file name\n");
+        		break;
+    		}
+
+    		char *folder = get_user_folder(ctx.username);
+    		char filepath[512];
+    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
+
+    		if (access(filepath, F_OK) != 0) {
+        		fprintf(stderr, "ERROR file not found: %s\n", filepath);
+    		} else if (remove(filepath) == 0) {
+        		printf("Arquivo excluído: %s\n", filepath);
+    		} else {
+        		perror("[Servidor] ERROR deleting file");
+    		}
+
+    		free(folder);
+    		break;
+		}
 		
 		default:
 			break;
@@ -368,4 +421,3 @@ void termination(int sig) {
 
 	exit(EXIT_SUCCESS);
 }
-
