@@ -282,8 +282,8 @@ void receive_file(int socketfd, const char *path_to_save){
 }
 
 
-Context *create_context(int socketfd, char *username){
-    Context *ctx = malloc(sizeof(Context));
+Session *create_session(int socketfd, char *username){
+    Session *ctx = malloc(sizeof(Session));
     ctx->username = malloc(strlen(username) + 1);
     strcpy(ctx->username,username);
     ctx->socketfd = socketfd;
@@ -291,7 +291,7 @@ Context *create_context(int socketfd, char *username){
     return ctx;
 }
 
-void free_context(Context *ctx){
+void free_session(Session *ctx){
     free(ctx->username);
     free(ctx);
 }

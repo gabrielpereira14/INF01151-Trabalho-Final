@@ -205,8 +205,8 @@ int main() {
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
 
-		Context *ctx_interface = create_context(sock_interface, request);
-		Context *ctx_receive = create_context(sock_receive, request);
+		Session *ctx_interface = create_session(sock_interface, request);
+		Session *ctx_receive = create_session(sock_receive, request);
 
 
 		pthread_create(&interface_thread, NULL, interface, ctx_interface);
@@ -217,8 +217,8 @@ int main() {
 		pthread_join(send_thread, NULL);
 		pthread_join(receive_thread, NULL);
 
-		free_context(ctx_interface);
-		free_context(ctx_receive);
+		free_session(ctx_interface);
+		free_session(ctx_receive);
     }
     
 
@@ -298,7 +298,7 @@ char* list_files(const char *folder_path) {
 
 // Recebe e executa os comandos do usuário
 void *interface(void* arg) {
-	Context ctx = *((Context *) arg);
+	Session ctx = *((Session *) arg);
 
 	while (1)
 	{
@@ -396,7 +396,7 @@ void *send_f(void* arg) {
 
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
-	Context ctx = *((Context *) arg);
+	Session ctx = *((Session *) arg);
 	
 	while (1)
 	{
