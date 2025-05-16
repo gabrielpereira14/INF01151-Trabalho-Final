@@ -282,16 +282,18 @@ void receive_file(int socketfd, const char *path_to_save){
 }
 
 
-Session *create_session(int socketfd, char *username){
-    Session *ctx = malloc(sizeof(Session));
-    ctx->username = malloc(strlen(username) + 1);
-    strcpy(ctx->username,username);
-    ctx->socketfd = socketfd;
+Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd, char *username){
+    Session *session = malloc(sizeof(Session));
+    session->username = malloc(strlen(username) + 1);
+    strcpy(session->username,username);
+    session->interface_socketfd = interface_socketfd;
+    session->receive_socketfd = receive_socketfd;
+    session->send_socketfd = send_socketfd;
 
-    return ctx;
+    return session;
 }
 
-void free_session(Session *ctx){
-    free(ctx->username);
-    free(ctx);
+void free_session(Session *session){
+    free(session->username);
+    free(session);
 }

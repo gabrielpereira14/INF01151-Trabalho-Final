@@ -205,20 +205,17 @@ int main() {
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
 
-		Session *ctx_interface = create_session(sock_interface, request);
-		Session *ctx_receive = create_session(sock_receive, request);
+		Session *user_session = create_session(sock_interface, sock_receive, sock_send, request);
 
-
-		pthread_create(&interface_thread, NULL, interface, ctx_interface);
+		pthread_create(&interface_thread, NULL, interface, user_session);
 		pthread_create(&send_thread, NULL, send_f, &sock_send);
-		pthread_create(&receive_thread, NULL, receive, ctx_receive);
+		pthread_create(&receive_thread, NULL, receive, user_session);
 
 		pthread_join(interface_thread, NULL);
 		pthread_join(send_thread, NULL);
 		pthread_join(receive_thread, NULL);
 
-		free_session(ctx_interface);
-		free_session(ctx_receive);
+		free_session(user_session);
     }
     
 
@@ -298,25 +295,25 @@ char* list_files(const char *folder_path) {
 
 // Recebe e executa os comandos do usuário
 void *interface(void* arg) {
-	Session ctx = *((Session *) arg);
+	Session session = *((Session *) arg);
 
 	while (1)
 	{
-		int command = receive_command(ctx.socketfd);
+		int command = receive_command(session.interface_socketfd);
 
 		//fprintf(stderr, "Command: %d\n", command);
 
 		switch (command)
 		{
 		case PACKET_LIST:
-			char *folder_path = get_user_folder(ctx.username);
+			char *folder_path = get_user_folder(session.username);
 			char *files = list_files(folder_path);
 
 			int seqn = 0;
 			int total_packets = 1;
 			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
 
-			if(!send_packet(ctx.socketfd,&packet)){
+			if(!send_packet(session.interface_socketfd,&packet)){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
 				free(files);
@@ -329,7 +326,7 @@ void *interface(void* arg) {
 		case PACKET_DOWNLOAD: {
 			//printf("DOWNLOAD requisitado\n");
 
-    		Packet packet = read_packet(ctx.socketfd);
+    		Packet packet = read_packet(session.interface_socketfd);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name.\n");
         		break;
@@ -337,7 +334,7 @@ void *interface(void* arg) {
 
     		printf("Requested file: '%.*s'\n", packet.length, packet._payload);
 
-    		char *folder = get_user_folder(ctx.username);
+    		char *folder = get_user_folder(session.username);
     		char filepath[512];
     		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
 
@@ -348,7 +345,7 @@ void *interface(void* arg) {
     		}
 
     		printf("Sending file: %s\n", filepath);
-    		send_file(ctx.socketfd, filepath);
+    		send_file(session.interface_socketfd, filepath);
 
     		free(folder);
     		break;
@@ -357,13 +354,13 @@ void *interface(void* arg) {
 		case PACKET_DELETE: {
     		//printf("DELETE requisitado\n");
 			
-    		Packet packet = read_packet(ctx.socketfd);
+    		Packet packet = read_packet(session.interface_socketfd);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name\n");
         		break;
     		}
 
-    		char *folder = get_user_folder(ctx.username);
+    		char *folder = get_user_folder(session.username);
     		char filepath[512];
     		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
 
@@ -396,16 +393,16 @@ void *send_f(void* arg) {
 
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
-	Session ctx = *((Session *) arg);
+	Session session = *((Session *) arg);
 	
 	while (1)
 	{
-		char *folder_path = get_user_folder(ctx.username);
+		char *folder_path = get_user_folder(session.username);
 
 		printf("%s", folder_path);
 
-		create_folder_if_not_exists(USER_FILES_FOLDER,ctx.username);
-		receive_file(ctx.socketfd, folder_path);
+		create_folder_if_not_exists(USER_FILES_FOLDER,session.username);
+		receive_file(session.receive_socketfd, folder_path);
 
 		free(folder_path);
 	}

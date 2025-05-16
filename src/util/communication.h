@@ -25,9 +25,24 @@ typedef struct packet{
 
 typedef struct session
 {
-    int socketfd;
+    int interface_socketfd;
+    int receive_socketfd;
+    int send_socketfd;
+
     char *username;
 } Session;
+
+typedef struct sentFile
+{
+    int sender_socket;
+    char *username;
+    char *filepath;
+} SentFile;
+
+typedef struct context{
+    Session sessions[2];    
+    SentFile *sent_files;
+} Context;
 
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size);
@@ -41,5 +56,5 @@ void write_payload_to_file(char *filename, int socket);
 void send_file(const int sockfd, char *file_name);
 void receive_file(int socketfd, const char *path_to_save);
 size_t get_file_size(FILE *file_ptr);
-Session *create_session(int socketfd, char *username);
+Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd, char *username);
 void free_session(Session *ctx);
