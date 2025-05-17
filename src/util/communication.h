@@ -1,3 +1,5 @@
+#ifndef COMMUNICATION_HEADER
+#define COMMUNICATION_HEADER
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -6,10 +8,11 @@
 #include <unistd.h>
 #include <libgen.h>
 
-
 #define PACKET_HEADER_SIZE 10
 #define PAYLOAD_SIZE 236
 #define TEST_PORT 4003
+
+#define MAX_SESSIONS 2
 
 enum PacketTypes{
     PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE
@@ -23,26 +26,31 @@ typedef struct packet{
     const char* _payload;        
 } Packet;  
 
+struct context;
+
 typedef struct session
 {
     int interface_socketfd;
     int receive_socketfd;
     int send_socketfd;
 
-    char *username;
+    struct context *user_context;
 } Session;
 
+typedef struct context{
+    Session sessions[MAX_SESSIONS];    
+    char *username;
+} UserContext;
+
+/*
 typedef struct sentFile
 {
     int sender_socket;
     char *username;
     char *filepath;
 } SentFile;
+*/
 
-typedef struct context{
-    Session sessions[2];    
-    SentFile *sent_files;
-} Context;
 
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size);
@@ -56,5 +64,7 @@ void write_payload_to_file(char *filename, int socket);
 void send_file(const int sockfd, char *file_name);
 void receive_file(int socketfd, const char *path_to_save);
 size_t get_file_size(FILE *file_ptr);
-Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd, char *username);
-void free_session(Session *ctx);
+Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd);
+UserContext *create_context(char *username);
+int is_session_empty(Session *s);
+#endif

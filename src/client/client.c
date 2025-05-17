@@ -364,8 +364,10 @@ void *test_send_file(void *arg){
 	bzero(&(serv_addr.sin_zero), 8);     
 	
     
-	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
+	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0){
         printf("ERROR connecting\n");
+        pthread_exit(NULL);
+    }
 
     
     send_file(sockfd,"in.pdf");
@@ -476,7 +478,10 @@ int main(int argc, char* argv[]){
 
     pthread_create(&test_thread, NULL, test_send_file, port);
 
+    printf("antes do join");
+
     pthread_join(console_thread, NULL);
+    
 
 	close(sock_interface);
     return EXIT_SUCCESS;

@@ -1,19 +1,19 @@
-#include <stddef.h>
 
-// Temporário, no futuro trocar pela estrutura dos dados de sessão
-typedef int Value;
-typedef char *Key;
+#ifndef HASH_TABLE_HEADER
+#define HASH_TABLE_HEADER
+#include <stddef.h>
+#include "./communication.h"
 
 typedef struct node {
-    Key key;
-    Value value;
+    char* key;
+    UserContext *value;
     struct node *next;
 } Node;
 
 typedef Node *LinkedList;
 
-const LinkedList EMPTY_LINKED_LIST;
-void LinkedList_push(LinkedList *list, Key key, Value value);
+extern const LinkedList EMPTY_LINKED_LIST;
+void LinkedList_push(LinkedList *list, char* key, UserContext *value);
 
 typedef struct {
     size_t size;
@@ -23,5 +23,7 @@ typedef struct {
 HashTable HashTable_create(size_t size);
 // Consome o buffer de key, um novo string deve ser alocado
 // para inserir
-void HashTable_insert(HashTable table, Key key, Value value);
-Value *HashTable_search(HashTable table, Key key);
+UserContext *HashTable_insert(HashTable table, char* key, UserContext *value);
+UserContext *HashTable_search(HashTable table, char* key);
+
+#endif
