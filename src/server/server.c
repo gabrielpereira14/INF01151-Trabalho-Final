@@ -55,53 +55,12 @@ int create_folder_if_not_exists(const char *path, const char *folder_name) {
     return 0;
 }
 
-void *test_thread() {
-	int sockfd, newsockfd;
-	socklen_t clilen;
-	
-	struct sockaddr_in serv_addr, cli_addr;
-	
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        printf("ERROR opening socket");
-	
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(TEST_PORT);
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	bzero(&(serv_addr.sin_zero), 8);     
-    
-	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
-		printf("ERROR on binding");
-	
-	listen(sockfd, 5);
-	
-	clilen = sizeof(struct sockaddr_in);
-	if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
-		printf("ERROR on accept");
-
-
-	create_folder_if_not_exists("./","teste");
-	receive_file(newsockfd, "./teste");
- 
-
-	int n = write(newsockfd,"I got your message", 18);
-	if (n < 0) 
-		printf("ERROR writing to socket");
-
-	close(newsockfd);
-	close(sockfd);
-
-	pthread_exit(NULL);
-}
-
 int main() {
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
 
 	contextTable = HashTable_create(30);                
-
-	pthread_t test_thread_i;
-	pthread_create(&test_thread_i, NULL, test_thread, NULL);
-
+	
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
 	}
