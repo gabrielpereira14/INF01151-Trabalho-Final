@@ -13,6 +13,7 @@
 
 #include "../util/communication.h"
 #include "../util/connectionManagement.h"
+#include "../util/contextHashTable.h"
 
 #define MAX_USERNAME_LENGTH 32
 
@@ -59,7 +60,8 @@ int main() {
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
 
-	contextTable = HashTable_create(30);                
+	contextTable = HashTable_create(30); 
+            
 	
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
@@ -174,7 +176,7 @@ int main() {
 
 		Session *user_session = create_session(sock_interface, sock_receive, sock_send);
 
-		if(add_session_to_context(contextTable, user_session, strdup(username)) != 0){
+		if(add_session_to_context(&contextTable, user_session, strdup(username)) != 0){
 			// MAXIMO DE SESSAO ATINGIDA, AVISA O USER
 			fprintf(stderr, "Maximo de sessoes atingidas para o user %s!\n", username);
 			free(user_session);

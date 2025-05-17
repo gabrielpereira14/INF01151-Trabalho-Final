@@ -423,7 +423,7 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
 
-    pthread_t console_thread, file_watcher_thread, test_thread;
+    pthread_t console_thread, file_watcher_thread;
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
 

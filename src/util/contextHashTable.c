@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include "hashTable.h"
+#include "contextHashTable.h"
 
 const LinkedList EMPTY_LINKED_LIST = NULL;
 
@@ -45,14 +45,14 @@ size_t keyHash(const char* key, size_t modulo) {
     return hash;
 }
 
-UserContext *HashTable_insert(HashTable table, char* key, UserContext *value){
-    LinkedList *list = table.array + keyHash(key, table.size);
+UserContext *HashTable_insert(HashTable *table, char* key, UserContext *value){
+    LinkedList *list = table->array + keyHash(key, table->size);
     LinkedList_push(list, key, value);
     return (*list)->value;
 }
 
-UserContext *HashTable_search(HashTable table, char* key) {
-    LinkedList list = table.array[keyHash(key, table.size)];
+UserContext *HashTable_search(HashTable *table, char* key) {
+    LinkedList list = table->array[keyHash(key, table->size)];
     return LinkedList_get(list, key);
 }
 

@@ -28,19 +28,6 @@ typedef struct packet{
 
 struct context;
 
-typedef struct session
-{
-    int interface_socketfd;
-    int receive_socketfd;
-    int send_socketfd;
-
-    struct context *user_context;
-} Session;
-
-typedef struct context{
-    Session sessions[MAX_SESSIONS];    
-    char *username;
-} UserContext;
 
 /*
 typedef struct sentFile
@@ -64,7 +51,5 @@ void write_payload_to_file(char *filename, int socket);
 void send_file(const int sockfd, char *file_name);
 void receive_file(int socketfd, const char *path_to_save);
 size_t get_file_size(FILE *file_ptr);
-Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd);
-UserContext *create_context(char *username);
-int is_session_empty(Session *s);
+
 #endif
