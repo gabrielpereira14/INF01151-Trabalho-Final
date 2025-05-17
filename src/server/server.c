@@ -361,6 +361,22 @@ void *send_f(void* arg) {
 	pthread_exit(NULL);
 }
 
+int should_process_file(FileNode *list, const char *filename) {
+	if (!list){
+		return 1;
+	}
+	
+	uint32_t *old_crc = FileLinkedList_get(list, filename);
+
+	if (!old_crc){
+		return 1;
+	}
+
+    uint32_t new_crc = crc32(filename);
+
+    return (new_crc != (*old_crc));
+}
+
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
 	Session session = *((Session *) arg);
@@ -372,8 +388,17 @@ void *receive(void* arg) {
 		printf("%s", folder_path);
 
 		create_folder_if_not_exists(USER_FILES_FOLDER,session.user_context->username);
-		receive_file(session.receive_socketfd, folder_path);
+		char *filename = receive_file(session.receive_socketfd, folder_path);
 
+		if(should_process_file(session.user_context->file_list, filename)){
+			if (add_file_to_context(&contextTable,filename,session.user_context->username) != 0){
+				fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+			}
+			fprintf(stderr, "tem que mandar o arquivo pros outros user\n");
+			//TODO: MANDAR ARQUIVO PRO USUARIO DA OUTRA SESSAO (session.user_context->sessions) PELA SOCKET DE SEND (receive pro usuario)
+		}
+
+		free(filename);
 		free(folder_path);
 	}
 	pthread_exit(NULL);

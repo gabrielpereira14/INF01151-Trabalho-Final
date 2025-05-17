@@ -3,24 +3,19 @@
 #include <stdio.h>
 #include "fileLinkedList.h"
 
-const FileLinkedList EMPTY_FILE_LINKED_LIST = NULL;
+FileNode *FileLinkedList_push(FileNode *list, char* key, uint32_t file_hash){
+    FileNode *new_head = malloc(sizeof(FileNode));
+    new_head->key = strdup(key);
+    new_head->crc = file_hash;
+    new_head->next = list;
 
-void FileLinkedList_push(FileLinkedList *list, char* key, FileEntry *value) {
-    if (list == NULL)
-        return;
-
-    FileLinkedList new_head = malloc(sizeof(FileNode));
-    new_head->key = key;
-    new_head->value = value;
-    new_head->next = *list;
-
-    *list = new_head;
+    return new_head;
 }
 
-FileEntry *FileLinkedList_get(FileLinkedList list, char* key){
-    for (FileLinkedList node = list; list != NULL; node = node->next) {
+uint32_t *FileLinkedList_get(FileNode *list, const char* key){
+    for (FileNode *node = list; node != NULL; node = node->next) {
         if (strcmp(key, node->key) == 0)
-            return node->value; 
+            return &node->crc; 
     }
     return NULL;
 }

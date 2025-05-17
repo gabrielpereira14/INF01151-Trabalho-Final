@@ -49,7 +49,7 @@ Packet read_packet(int newsockfd);
 int send_packet(int sockfd, const Packet *packet);
 void write_payload_to_file(char *filename, int socket);
 void send_file(const int sockfd, char *file_name);
-void receive_file(int socketfd, const char *path_to_save);
+char *receive_file(int socketfd, const char *path_to_save);
 size_t get_file_size(FILE *file_ptr);
 
 #endif

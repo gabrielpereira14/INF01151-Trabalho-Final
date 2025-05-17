@@ -4,21 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct {
-    char filename[256];
-    uint32_t crc;
-} FileEntry;
-
 typedef struct filenode {
     char* key;
-    FileEntry *value;
+    uint32_t crc;
     struct filenode *next;
 } FileNode;
 
-typedef FileNode *FileLinkedList;
-
-extern const FileLinkedList EMPTY_FILE_LINKED_LIST;
-void FileLinkedList_push(FileLinkedList *list, char* key, FileEntry *value);
+FileNode *FileLinkedList_push(FileNode *list, char* key, uint32_t file_hash);
+uint32_t *FileLinkedList_get(FileNode *list, const char* key);
 
 /*
 typedef struct {

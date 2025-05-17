@@ -271,14 +271,16 @@ void send_file(const int sockfd, char *file_path){
     fclose(file_ptr);
 }
 
-void receive_file(int socketfd, const char *path_to_save){
+char *receive_file(int socketfd, const char *path_to_save){
     Packet packet = read_packet(socketfd);
-    char filename[packet.length + 1];
+    char *filename = malloc(packet.length + 1);
     memcpy(filename, packet._payload, packet.length);
     filename[packet.length] = '\0';
     char filepath[512];
     snprintf(filepath, sizeof(filepath), "%s/%s", path_to_save, filename);  
     write_payload_to_file(filepath,socketfd);
+
+    return filename;
 }
 
 
