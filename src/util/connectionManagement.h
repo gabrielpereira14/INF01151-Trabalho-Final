@@ -2,6 +2,7 @@
 #define CONNECTION_MANEGEMENT_HEADER
 
 #include "./communication.h"
+#include "./fileLinkedList.h"
 
 struct HashTable;
 typedef struct HashTable HashTable;
