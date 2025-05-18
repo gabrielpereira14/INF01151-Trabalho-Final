@@ -270,15 +270,15 @@ void *start_file_receiver_thread(void* arg) {
 
     while (1)
 	{
-        //pthread_mutex_lock(&sync_mutex);
+        pthread_mutex_lock(&sync_mutex);
 		char *filepath = receive_file(socket, sync_dir_path);
-        fprintf(stderr, "receive %s\n", filepath);
-        //pthread_mutex_unlock(&sync_mutex);
+        pthread_mutex_unlock(&sync_mutex);
         fprintf(stderr,"File received!\n");
 		free(filepath);
 	}
 	pthread_exit(NULL);
 }
+
 
 void *start_directory_watcher_thread(void* arg) {
     int socket = *(int*)arg;
@@ -324,18 +324,11 @@ void *start_directory_watcher_thread(void* arg) {
 
             snprintf(event_file_path, path_size, "%s/%s", sync_dir_path, event->name);
 
-            /*
-            if (event->mask & IN_CREATE) {
-                send_file(socket, event_file_path);
-            }
-            */
-
             if (event->mask & IN_CLOSE_WRITE) {
-                fprintf(stderr, "inotify %s\n", event_file_path);
                 sleep(1);
-                //pthread_mutex_lock(&sync_mutex);
+                pthread_mutex_lock(&sync_mutex);
                 send_file(socket, event_file_path);
-                //pthread_mutex_unlock(&sync_mutex);
+                pthread_mutex_unlock(&sync_mutex);
             }
 
             i += sizeof(struct inotify_event) + event->len;

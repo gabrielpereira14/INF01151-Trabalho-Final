@@ -105,8 +105,6 @@ int is_session_empty(Session *s) {
 
 void send_file_to_session(int send_to_index, UserContext *context, char *filepath){
     if(!is_session_empty(context->sessions[send_to_index])){
-        char *filename = basename(filepath);
-        add_file_to_sync_buffer(&context->sessions[send_to_index]->sync_buffer, context->username, filename, send_to_index);
-        //send_file(context->sessions[send_to_index]->send_socketfd, filename);
+        add_file_to_sync_buffer(&context->sessions[send_to_index]->sync_buffer, context->username, filepath, send_to_index);
     }
 }

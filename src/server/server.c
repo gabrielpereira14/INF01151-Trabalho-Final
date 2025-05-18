@@ -399,7 +399,6 @@ void *send_f(void* arg) {
 	while (session->active)
 	{
 		FileEntry file_entry = get_next_file_to_sync(&session->sync_buffer);
-		fprintf(stderr, "File sent to %d!", session->session_index);
 		send_file(session->send_socketfd, file_entry.filename);
     	free_file_entry(file_entry); 
 	}
@@ -408,23 +407,20 @@ void *send_f(void* arg) {
 }
 
 int should_process_file(FileNode *list, const char *filepath) {
-	fprintf(stderr, "File checked\n");
 	if (!list){
-		fprintf(stderr, "No files saved\n");
+		//fprintf(stderr, "No files saved\n");
 		return 1;
 	}
 
 	FileNode *file_node = FileLinkedList_get(list, filepath);
 
 	if (!file_node){
-		fprintf(stderr, "File not found\n");
+		//fprintf(stderr, "File not found\n");
 		return 1;
 	}
 
 	uint32_t old_crc = file_node->crc;
     uint32_t new_crc = crc32(filepath);
-
-	fprintf(stderr, "Crc check %s: %lu vs  %lu\n", filepath, (unsigned long)new_crc, (unsigned long)old_crc);
     return (new_crc != old_crc);
 }
 
@@ -446,19 +442,9 @@ void *receive(void* arg) {
 				}
 			}else{
 				file_node->crc = crc32(filepath);
-				fprintf(stderr, "Crc updated");
 			}
-
 			
-
-			for (FileNode *node = session->user_context->file_list; node != NULL; node = node->next) {
-				fprintf(stderr, "\n%s\n%lu\n", node->key, (unsigned long)node->crc);
-			}
-
-			
-
 			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
-
 			send_file_to_session(send_to_index, session->user_context, filepath);
 		}
 
