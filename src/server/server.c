@@ -24,7 +24,6 @@
 #define USER_FILES_FOLDER "user files"
 const int ANSWER_OK = 1;
 
-
 HashTable contextTable;
 
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
@@ -92,14 +91,9 @@ int main() {
 	interface_serv_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(interface_serv_addr.sin_zero), 8);
 
-   
-
-   do {
-        interface_socket_port = (rand() % 30000) + 2000;
-        interface_serv_addr.sin_port = htons(interface_socket_port);
-    } while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0);
-
-	fprintf(stderr, "Server running on port %d\n", interface_socket_port);
+    if (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0) {
+		perror_exit("ERRO ao fazer bind no port da interface");
+	}
 
 	
 	uint16_t receive_socket_port = interface_socket_port + 1;
