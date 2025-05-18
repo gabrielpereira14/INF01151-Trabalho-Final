@@ -94,10 +94,10 @@ int main() {
 
    
 
-   do {
+	while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
         interface_socket_port = (rand() % 30000) + 2000;
         interface_serv_addr.sin_port = htons(interface_socket_port);
-    } while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0);
+    } ;
 
 	fprintf(stderr, "Server running on port %d\n", interface_socket_port);
 
