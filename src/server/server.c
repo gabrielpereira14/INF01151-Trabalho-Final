@@ -10,20 +10,28 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <dirent.h>
+#include <time.h>
+#include <limits.h>
+
 
 #include "../util/communication.h"
+#include "../util/connectionManagement.h"
+#include "../util/contextHashTable.h"
+#include "../util/fileSync.h"
 
 #define MAX_USERNAME_LENGTH 32
 
 #define USER_FILES_FOLDER "user files"
 const int ANSWER_OK = 1;
 
+
+HashTable contextTable;
+
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
 void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
 void *receive(void* arg); // Recebe os arquivos do cliente
 void termination(int sig);
-
 
 // Variáveis definidas globalmente para poderem ser fechadas na função de terminação
 // -1 sempre é um fd inválido, e pode ser fechado sem problemas
@@ -51,51 +59,13 @@ int create_folder_if_not_exists(const char *path, const char *folder_name) {
     return 0;
 }
 
-void *test_thread() {
-	int sockfd, newsockfd;
-	socklen_t clilen;
-	
-	struct sockaddr_in serv_addr, cli_addr;
-	
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        printf("ERROR opening socket");
-	
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(TEST_PORT);
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	bzero(&(serv_addr.sin_zero), 8);     
-    
-	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
-		printf("ERROR on binding");
-	
-	listen(sockfd, 5);
-	
-	clilen = sizeof(struct sockaddr_in);
-	if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
-		printf("ERROR on accept");
-
-
-	create_folder_if_not_exists("./","teste");
-	receive_file(newsockfd, "./teste");
- 
-
-	int n = write(newsockfd,"I got your message", 18);
-	if (n < 0) 
-		printf("ERROR writing to socket");
-
-	close(newsockfd);
-	close(sockfd);
-
-	pthread_exit(NULL);
-}
-
 int main() {
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
 
-	pthread_t test_thread_i;
-	pthread_create(&test_thread_i, NULL, test_thread, NULL);
-
+	contextTable = HashTable_create(30); 
+            
+	
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
 	}
@@ -110,6 +80,7 @@ int main() {
 	if ((sock_receive_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
         perror_exit("ERRO abrindo o socket de espera por coneccao de receive: ");
 
+
     // Faz bind nos ports
 	struct sockaddr_in interface_serv_addr, send_serv_addr, receive_serv_addr;
 
@@ -123,9 +94,10 @@ int main() {
 
    
 
-    while ( bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
-		interface_socket_port =(rand() % 30000) + 2000; 
-	}
+	while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
+        interface_socket_port = (rand() % 30000) + 2000;
+        interface_serv_addr.sin_port = htons(interface_socket_port);
+    } ;
 
 	fprintf(stderr, "Server running on port %d\n", interface_socket_port);
 
@@ -169,15 +141,15 @@ int main() {
 		    perror_exit("ERRO ao aceitar coneccoes da interface: ");
 
         // Verifica se a conecção é válida e responde para o cliente
-	    char request[MAX_USERNAME_LENGTH + 1];
+	    char username[MAX_USERNAME_LENGTH + 1];
 
-        int request_size = read(sock_interface, request, MAX_USERNAME_LENGTH);
+        int request_size = read(sock_interface, username, MAX_USERNAME_LENGTH);
 	    if (request_size < 0) 
 		    perror_exit("ERRO lendo o pedido de coneccao do usuário: ");
 
-		request[request_size] = '\0';
+		username[request_size] = '\0';
 		printf("Usuario: ");
-		printf("%s", request);
+		printf("%s", username);
 		printf("\n");
 		fflush(stdout);
 
@@ -205,23 +177,22 @@ int main() {
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
 
-		Context *ctx_interface = create_context(sock_interface, request);
-		Context *ctx_receive = create_context(sock_receive, request);
+		ContextThreads threads = {&interface_thread, &send_thread, &receive_thread};
 
+		Session *user_session = create_session(sock_interface, sock_receive, sock_send);
 
-		pthread_create(&interface_thread, NULL, interface, ctx_interface);
-		pthread_create(&send_thread, NULL, send_f, &sock_send);
-		pthread_create(&receive_thread, NULL, receive, ctx_receive);
+		if(add_session_to_context(&contextTable, user_session, strdup(username), threads) != 0){
+			// MAXIMO DE SESSAO ATINGIDA, AVISA O USER
+			fprintf(stderr, "Maximo de sessoes atingidas para o user %s!\n", username);
+			free(user_session);
+			continue;
+		}
 
-		pthread_join(interface_thread, NULL);
-		pthread_join(send_thread, NULL);
-		pthread_join(receive_thread, NULL);
+		pthread_create(&interface_thread, NULL, interface, user_session);
+		pthread_create(&send_thread, NULL, send_f, user_session);
+		pthread_create(&receive_thread, NULL, receive, user_session);
 
-		free_context(ctx_interface);
-		free_context(ctx_receive);
     }
-    
-
 
     return 0;
 }
@@ -236,7 +207,7 @@ int receive_command(int socketfd){
 	return packet.type;
 }
 
-char *get_user_folder(char *username){
+char *get_user_folder(const char *username){
     size_t len = strlen(USER_FILES_FOLDER) + strlen(username) + 2;
 
     char *path = malloc(len);
@@ -250,6 +221,7 @@ char *get_user_folder(char *username){
 	return path;
 }
 
+
 char* list_files(const char *folder_path) {
     struct dirent *entry;
     DIR *dir = opendir(folder_path);
@@ -258,7 +230,7 @@ char* list_files(const char *folder_path) {
         return NULL;
     }
 
-    size_t buffer_size = 1024;
+    size_t buffer_size = 4096;
     char *result = malloc(buffer_size);
     if (result == NULL) {
         perror("malloc");
@@ -267,16 +239,32 @@ char* list_files(const char *folder_path) {
     }
     result[0] = '\0';
 
+    char path[PATH_MAX];
+    struct stat info;
+
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.' && 
-           (entry->d_name[1] == '\0' || 
+        if (entry->d_name[0] == '.' &&
+           (entry->d_name[1] == '\0' ||
            (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
             continue;
         }
 
-        size_t needed = strlen(result) + strlen(entry->d_name) + 4;
+        snprintf(path, sizeof(path), "%s/%s", folder_path, entry->d_name);
+        if (stat(path, &info) != 0) {
+            continue;
+        }
+
+        char mod_time[20], acc_time[20], chg_time[20];
+        strftime(mod_time, sizeof(mod_time), "%d/%m/%Y %H:%M:%S", localtime(&info.st_mtime));
+        strftime(acc_time, sizeof(acc_time), "%d/%m/%Y %H:%M:%S", localtime(&info.st_atime));
+        strftime(chg_time, sizeof(chg_time), "%d/%m/%Y %H:%M:%S", localtime(&info.st_ctime));
+
+        size_t needed = strlen(result) + strlen(entry->d_name) + strlen(mod_time)
+                      + strlen(acc_time) + strlen(chg_time) + 200;
         if (needed > buffer_size) {
-            buffer_size *= 2;
+            while (needed > buffer_size) {
+                buffer_size *= 2;
+            }
             char *new_result = realloc(result, buffer_size);
             if (new_result == NULL) {
                 perror("realloc");
@@ -287,9 +275,15 @@ char* list_files(const char *folder_path) {
             result = new_result;
         }
 
-		strcat(result, "  ");
+        strcat(result, "\nFile: ");
         strcat(result, entry->d_name);
-        strcat(result, "\n");
+        strcat(result, "\n    Modification time: ");
+        strcat(result, mod_time);
+        strcat(result, "\n          Access time: ");
+        strcat(result, acc_time);
+        strcat(result, "\n Change/creation time: ");
+        strcat(result, chg_time);
+        strcat(result, "\n\n");
     }
 
     closedir(dir);
@@ -298,25 +292,25 @@ char* list_files(const char *folder_path) {
 
 // Recebe e executa os comandos do usuário
 void *interface(void* arg) {
-	Context ctx = *((Context *) arg);
+	Session *session = (Session *) arg;
 
-	while (1)
+	while (session->active)
 	{
-		int command = receive_command(ctx.socketfd);
+		int command = receive_command(session->interface_socketfd);
 
 		//fprintf(stderr, "Command: %d\n", command);
 
 		switch (command)
 		{
 		case PACKET_LIST:
-			char *folder_path = get_user_folder(ctx.username);
+			char *folder_path = get_user_folder(session->user_context->username);
 			char *files = list_files(folder_path);
 
 			int seqn = 0;
 			int total_packets = 1;
 			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
 
-			if(!send_packet(ctx.socketfd,&packet)){
+			if(!send_packet(session->interface_socketfd,&packet)){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
 				free(files);
@@ -329,7 +323,7 @@ void *interface(void* arg) {
 		case PACKET_DOWNLOAD: {
 			//printf("DOWNLOAD requisitado\n");
 
-    		Packet packet = read_packet(ctx.socketfd);
+    		Packet packet = read_packet(session->interface_socketfd);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name.\n");
         		break;
@@ -337,7 +331,7 @@ void *interface(void* arg) {
 
     		printf("Requested file: '%.*s'\n", packet.length, packet._payload);
 
-    		char *folder = get_user_folder(ctx.username);
+    		char *folder = get_user_folder(session->user_context->username);
     		char filepath[512];
     		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
 
@@ -348,7 +342,7 @@ void *interface(void* arg) {
     		}
 
     		printf("Sending file: %s\n", filepath);
-    		send_file(ctx.socketfd, filepath);
+    		send_file(session->interface_socketfd, filepath);
 
     		free(folder);
     		break;
@@ -357,13 +351,13 @@ void *interface(void* arg) {
 		case PACKET_DELETE: {
     		//printf("DELETE requisitado\n");
 			
-    		Packet packet = read_packet(ctx.socketfd);
+    		Packet packet = read_packet(session->interface_socketfd);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name\n");
         		break;
     		}
 
-    		char *folder = get_user_folder(ctx.username);
+    		char *folder = get_user_folder(session->user_context->username);
     		char filepath[512];
     		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
 
@@ -378,37 +372,86 @@ void *interface(void* arg) {
     		free(folder);
     		break;
 		}
+
+		case PACKET_EXIT:{
+			session->active = 0;
+			session->user_context->sessions[session->session_index] = NULL;
+			close(session->receive_socketfd);
+			close(session->interface_socketfd);
+			close(session->send_socketfd);
+			pthread_join(*session->user_context->threads.receive_thread, NULL); 
+			pthread_join(*session->user_context->threads.send_thread, NULL); 
+		}
 		
 		default:
 			break;
 		}
 	}
 
+	free(arg);
 	pthread_exit(NULL);
 }
 
 // Envia os arquivos para o cliente
 void *send_f(void* arg) {
-	int socketfd = *((int *) arg);
+	Session *session = (Session *) arg;
+
+	while (session->active)
+	{
+		FileEntry file_entry = get_next_file_to_sync(&session->sync_buffer);
+		send_file(session->send_socketfd, file_entry.filename);
+    	free_file_entry(file_entry); 
+	}
 		
 	pthread_exit(NULL);
 }
 
+int should_process_file(FileNode *list, const char *filepath) {
+	if (!list){
+		//fprintf(stderr, "No files saved\n");
+		return 1;
+	}
+
+	FileNode *file_node = FileLinkedList_get(list, filepath);
+
+	if (!file_node){
+		//fprintf(stderr, "File not found\n");
+		return 1;
+	}
+
+	uint32_t old_crc = file_node->crc;
+    uint32_t new_crc = crc32(filepath);
+    return (new_crc != old_crc);
+}
+
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
-	Context ctx = *((Context *) arg);
-	
-	while (1)
+	Session *session = (Session *) arg;
+	while (session->active)
 	{
-		char *folder_path = get_user_folder(ctx.username);
+		char *folder_path = get_user_folder(session->user_context->username);
 
-		printf("%s", folder_path);
+		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
+		char *filepath = receive_file(session->receive_socketfd, folder_path);
+		
+		if(should_process_file(session->user_context->file_list, filepath)){
+			FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
+			if(!file_node){
+				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
+					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+				}
+			}else{
+				file_node->crc = crc32(filepath);
+			}
+			
+			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
+			send_file_to_session(send_to_index, session->user_context, filepath);
+		}
 
-		create_folder_if_not_exists(USER_FILES_FOLDER,ctx.username);
-		receive_file(ctx.socketfd, folder_path);
-
+		free(filepath);
 		free(folder_path);
 	}
+	
 	pthread_exit(NULL);
 }
 

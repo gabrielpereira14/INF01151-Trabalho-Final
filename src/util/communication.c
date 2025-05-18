@@ -173,14 +173,11 @@ Packet read_packet(int newsockfd) {
 
 
 void write_payload_to_file(char *filename, int socket) {
-    remove(filename);
-    
-
-    FILE *file = fopen(filename, "a+");
+    FILE *file = fopen(filename, "w");
     if (file == NULL) {
         printf("Error opening file!\n");
-        printf("\n%s",filename);
-        exit(1);
+        printf("\n%s", filename);
+        return;
     }
 
     Packet packet;
@@ -189,6 +186,10 @@ void write_payload_to_file(char *filename, int socket) {
         fwrite(packet._payload, packet.length, 1, file);
     } while (packet.seqn < packet.total_size - 1);
 
+    fflush(file);  // important!
+    if (fsync(fileno(file)) == -1) {
+        perror("fsync");
+    }
     fclose(file);
 }
 
@@ -232,7 +233,7 @@ void send_file(const int sockfd, char *file_path){
     if(file_ptr == NULL)
     {
         printf("Error opening file!");   
-        exit(1);             
+        return;           
     }
 
     size_t file_size = get_file_size(file_ptr);
@@ -271,27 +272,17 @@ void send_file(const int sockfd, char *file_path){
     fclose(file_ptr);
 }
 
-void receive_file(int socketfd, const char *path_to_save){
+char *receive_file(int socketfd, const char *path_to_save){
     Packet packet = read_packet(socketfd);
-    char filename[packet.length + 1];
+    char *filename = malloc(packet.length + 1);
     memcpy(filename, packet._payload, packet.length);
     filename[packet.length] = '\0';
-    char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s", path_to_save, filename);  
+    char *filepath = malloc(strlen(path_to_save) + 1 + strlen(filename) + 1);
+    sprintf(filepath, "%s/%s", path_to_save, filename); 
     write_payload_to_file(filepath,socketfd);
+
+    free(filename);
+    return filepath;
 }
 
 
-Context *create_context(int socketfd, char *username){
-    Context *ctx = malloc(sizeof(Context));
-    ctx->username = malloc(strlen(username) + 1);
-    strcpy(ctx->username,username);
-    ctx->socketfd = socketfd;
-
-    return ctx;
-}
-
-void free_context(Context *ctx){
-    free(ctx->username);
-    free(ctx);
-}

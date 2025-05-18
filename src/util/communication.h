@@ -1,3 +1,5 @@
+#ifndef COMMUNICATION_HEADER
+#define COMMUNICATION_HEADER
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -6,13 +8,14 @@
 #include <unistd.h>
 #include <libgen.h>
 
-
 #define PACKET_HEADER_SIZE 10
 #define PAYLOAD_SIZE 236
 #define TEST_PORT 4003
 
+#define MAX_SESSIONS 2
+
 enum PacketTypes{
-    PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE
+    PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT
 };
 
 typedef struct packet{ 
@@ -23,11 +26,18 @@ typedef struct packet{
     const char* _payload;        
 } Packet;  
 
-typedef struct context
+struct context;
+
+
+/*
+typedef struct sentFile
 {
-    int socketfd;
+    int sender_socket;
     char *username;
-} Context;
+    char *filepath;
+} SentFile;
+*/
+
 
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size);
@@ -39,7 +49,7 @@ Packet read_packet(int newsockfd);
 int send_packet(int sockfd, const Packet *packet);
 void write_payload_to_file(char *filename, int socket);
 void send_file(const int sockfd, char *file_name);
-void receive_file(int socketfd, const char *path_to_save);
+char *receive_file(int socketfd, const char *path_to_save);
 size_t get_file_size(FILE *file_ptr);
-Context *create_context(int socketfd, char *username);
-void free_context(Context *ctx);
+
+#endif
