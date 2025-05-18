@@ -395,6 +395,7 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
 
 int main(int argc, char* argv[]) { 
     char *username;
+    struct hostent *server;
     pthread_mutex_init(&sync_mutex, NULL);
     uint16_t console_socket_port = 4000;
 
@@ -405,20 +406,26 @@ int main(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if(argc >= 3){
-        console_socket_port = atoi(argv[2]);
+    if (argc >= 3) {
+	    if ((server = gethostbyname("localhost")) == NULL) {
+            perror_exit("ERRO servidor nao encontrado");
+        }
+    } else {
+        fprintf(stderr, "ERRO deve ser fornecido um endereço de servidor\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(argc >= 4){
+        console_socket_port = atoi(argv[3]);
+    } else {
+        fprintf(stderr, "ERRO deve ser fornecida uma porta de servidor\n");
+        exit(EXIT_FAILURE);
     }
 
     uint16_t send_socket_port = console_socket_port + 1;
     uint16_t receive_socket_port = console_socket_port + 2;
 
     if(set_sync_dir_path() != 0) {
-        return EXIT_FAILURE;
-    }
-
-    struct hostent *server;
-	if ((server = gethostbyname("localhost")) == NULL) {
-        fprintf(stderr,"ERRO servidor nao encontrado\n");
         return EXIT_FAILURE;
     }
 

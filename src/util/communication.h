@@ -13,13 +13,6 @@
 
 #define MAX_SESSIONS 2
 
-// Ports em que o servidor escuta conecções
-const uint16_t SERVER_INTERFACE_PORT = 4000;
-const uint16_t SERVER_SEND_PORT = SERVER_INTERFACE_PORT + 1;
-const uint16_t SERVER_RECEIVE_PORT = SERVER_INTERFACE_PORT + 2;
-
-const uint16_t CLIENT_START_PORT = 4000;
-
 enum PacketTypes{
     PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT
 };

@@ -1,4 +1,3 @@
-
 #include "communication.h"
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size) {
