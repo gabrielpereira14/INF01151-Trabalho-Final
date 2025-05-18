@@ -4,9 +4,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#define BUFFER_SIZE 100
-
-FileEntry file_sync_buffer[BUFFER_SIZE];
 int start = 0;
 int end = 0;
 int count = 0;
@@ -17,7 +14,7 @@ pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
 
 void add_file_to_sync_buffer(FileSyncBuffer *buffer, const char *username, const char *filename, int session_index) {
     pthread_mutex_lock(&buffer->lock);
-    while (buffer->count == BUFFER_SIZE)
+    while (buffer->count == FILE_SYNC_BUFFER_SIZE)
         pthread_cond_wait(&buffer->not_full, &buffer->lock);
 
     FileEntry *entry = &buffer->buffer[buffer->end];
@@ -25,7 +22,7 @@ void add_file_to_sync_buffer(FileSyncBuffer *buffer, const char *username, const
     entry->filename = strdup(filename);
     entry->to_session_index = session_index;
 
-    buffer->end = (buffer->end + 1) % BUFFER_SIZE;
+    buffer->end = (buffer->end + 1) % FILE_SYNC_BUFFER_SIZE;
     buffer->count++;
 
     pthread_cond_signal(&buffer->not_empty);
@@ -40,7 +37,7 @@ FileEntry get_next_file_to_sync(FileSyncBuffer *buffer) {
         pthread_cond_wait(&buffer->not_empty, &buffer->lock);
 
     FileEntry entry = buffer->buffer[buffer->start];
-    buffer->start = (buffer->start + 1) % BUFFER_SIZE;
+    buffer->start = (buffer->start + 1) % FILE_SYNC_BUFFER_SIZE;
     buffer->count--;
 
     pthread_cond_signal(&buffer->not_full);

@@ -1,6 +1,7 @@
 #ifndef FILE_SYNC_H
 #define FILE_SYNC_H
 #include <pthread.h>
+
 #define FILE_SYNC_BUFFER_SIZE 10 
 
 typedef struct fileEntry {
