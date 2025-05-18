@@ -26,7 +26,7 @@
 char sync_dir_path[PATH_MAX];
 pthread_mutex_t sync_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int create_sync_dir(){
+int create_sync_dir() {
     if (mkdir(sync_dir_path, 0755) == -1) {
         if (errno != EEXIST) {
             perror("mkdir() error");
@@ -79,7 +79,7 @@ char *build_destination_path(const char *source_path) {
     return full_path;
 }
 
-int upload(const char *source_path){
+int upload(const char *source_path) {
     char *dest_path = build_destination_path(source_path);
     if (!dest_path) {
         fprintf(stderr, "ERROR: Failed to construct destination path.\n");
@@ -96,8 +96,7 @@ int upload(const char *source_path){
 }
 
 
-int get_command(char* command, char* arg)
-{
+int get_command(char* command, char* arg) {
     char input[MAX_INPUT_SIZE];
     
     fflush(stdout);
@@ -112,7 +111,7 @@ int get_command(char* command, char* arg)
     return OK;
 }
 
-void list_server(int socketfd){
+void list_server(int socketfd) {
     char *dummy = "";
     Packet control_packet = create_control_packet(PACKET_LIST, 1, dummy);
 
@@ -205,7 +204,7 @@ void delete(const char *filename, int socketfd) {
     printf("Exclusão solicitada.\n");
 }
 
-void close_client(int socketfd){
+void close_client(int socketfd) {
     char *dummy = "";
     Packet control_packet = create_control_packet(PACKET_EXIT, 1, dummy);
 
@@ -215,16 +214,14 @@ void close_client(int socketfd){
     }
 }
 
-void *start_console_input_thread(void *arg){
+void *start_console_input_thread(void *arg) {
     int socketfd = *((int*) arg);
     char command[MAX_COMMAND] = "\0";
     char path[MAX_ARGUMENT] = "\0";
 
     printf("Client started!\n");
 
-
-    while (strcmp(command, "exit") != 0)
-    {
+    while (strcmp(command, "exit") != 0) {
         command[0] = '\0';
         path[0] = '\0';
 
@@ -235,41 +232,32 @@ void *start_console_input_thread(void *arg){
             close_client(socketfd);
             printf("Client closed\n");
             break;
-        }
-        else if (strcmp(command, "get_sync_dir") == 0){
+        } else if (strcmp(command, "get_sync_dir") == 0) {
             create_sync_dir();
-        }
-        else if (strcmp(command, "list_client") == 0){   
+        } else if (strcmp(command, "list_client") == 0) {   
             list_client();
-        }
-        else if (strcmp(command, "list_server") == 0){
+        } else if (strcmp(command, "list_server") == 0) {
             list_server(socketfd);
-        }
-        else if (strcmp(command, "upload") == 0){
-            if (upload(path) != 0)
-            {
+        } else if (strcmp(command, "upload") == 0) {
+            if (upload(path) != 0) {
                 fprintf(stderr, "ERROR: Failed to upload file.");
             }
-        }
-        else if (strcmp(command, "delete") == 0){
+        } else if (strcmp(command, "delete") == 0) {
             delete(path, socketfd);
-        }
-        else if (strcmp(command, "download") == 0){
+        } else if (strcmp(command, "download") == 0) {
             download(path, socketfd);
-        }
-        else{
+        } else{
             printf("Unknown command: %s\n", command);
         }
-      
     }
+
     pthread_exit(0);
 }
 
 void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
-    while (1)
-	{
+    while (1) {
         //pthread_mutex_lock(&sync_mutex);
 		char *filepath = receive_file(socket, sync_dir_path);
         fprintf(stderr, "receive %s\n", filepath);
@@ -277,6 +265,7 @@ void *start_file_receiver_thread(void* arg) {
         fprintf(stderr,"File received!\n");
 		free(filepath);
 	}
+
 	pthread_exit(NULL);
 }
 
@@ -293,13 +282,13 @@ void *start_directory_watcher_thread(void* arg) {
 
     wd = -1;
 
-    do{
+    do {
         usleep(200);
         wd = inotify_add_watch(fd, sync_dir_path, 
            // IN_CREATE 
            // | 
             IN_CLOSE_WRITE);
-    }while(wd < 0);
+    } while(wd < 0);
   
 
     while (1) {
@@ -347,7 +336,7 @@ void *start_directory_watcher_thread(void* arg) {
     pthread_exit(NULL);
 }
 
-int set_sync_dir_path(){
+int set_sync_dir_path() {
     if (getcwd(sync_dir_path, sizeof(sync_dir_path)) == NULL) {
         perror("getcwd() error");
         return 1;
@@ -362,7 +351,7 @@ int set_sync_dir_path(){
 }
 
 
-struct sockaddr_in setup_socket_address(struct hostent *server, int port){
+struct sockaddr_in setup_socket_address(struct hostent *server, int port) {
     struct sockaddr_in sockaddr;
     sockaddr.sin_family = AF_INET;     
 	sockaddr.sin_port = htons(port);    
@@ -372,7 +361,7 @@ struct sockaddr_in setup_socket_address(struct hostent *server, int port){
     return sockaddr;
 }
 
-int connect_to_server(int *sockfd, struct hostent *server, int port, char *username){
+int connect_to_server(int *sockfd, struct hostent *server, int port, char *username) {
     if (((*sockfd) = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         fprintf(stderr, "ERRO abrindo o socket da interface\n");
         return 1;
@@ -404,7 +393,7 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
     return 0;
 }
 
-int main(int argc, char* argv[]){ 
+int main(int argc, char* argv[]) { 
     char *username;
     pthread_mutex_init(&sync_mutex, NULL);
     uint16_t console_socket_port = 4000;
@@ -424,7 +413,7 @@ int main(int argc, char* argv[]){
     uint16_t receive_socket_port = console_socket_port + 2;
 
 
-    if(set_sync_dir_path() != 0){
+    if(set_sync_dir_path() != 0) {
         return EXIT_FAILURE;
     }
 
@@ -435,7 +424,7 @@ int main(int argc, char* argv[]){
     }
 
     int sock_interface;
-    if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
+    if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0) {
         exit(EXIT_FAILURE);
     }
     
@@ -467,7 +456,6 @@ int main(int argc, char* argv[]){
 
     pthread_join(console_thread, NULL);
     
-
 	close(sock_interface);
     return EXIT_SUCCESS;
 }

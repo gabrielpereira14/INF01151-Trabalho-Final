@@ -13,7 +13,6 @@
 #include <time.h>
 #include <limits.h>
 
-
 #include "../util/communication.h"
 #include "../util/connectionManagement.h"
 #include "../util/contextHashTable.h"
@@ -63,7 +62,6 @@ int main() {
 	signal(SIGINT, termination);
 
 	contextTable = HashTable_create(30); 
-            
 	
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
@@ -79,12 +77,10 @@ int main() {
 	if ((sock_receive_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
         perror_exit("ERRO abrindo o socket de espera por coneccao de receive: ");
 
-
     // Faz bind nos ports
 	struct sockaddr_in interface_serv_addr, send_serv_addr, receive_serv_addr;
 
 	uint16_t interface_socket_port = 4000;
-	
 
     interface_serv_addr.sin_family = AF_INET;
 	interface_serv_addr.sin_port = htons(interface_socket_port);
@@ -94,11 +90,9 @@ int main() {
     if (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0) {
 		perror_exit("ERRO ao fazer bind no port da interface");
 	}
-
 	
 	uint16_t receive_socket_port = interface_socket_port + 1;
 	uint16_t send_socket_port = interface_socket_port + 2;
-
 
 	receive_serv_addr.sin_family = AF_INET;
     receive_serv_addr.sin_port = htons(receive_socket_port);
@@ -122,7 +116,6 @@ int main() {
 	listen(sock_interface_listen, 5);
 	listen(sock_receive_listen, 1);
 	listen(sock_send_listen, 1);
-	
 
     while (1) {
         // Espera uma requisição de conecção
@@ -185,7 +178,6 @@ int main() {
 		pthread_create(&interface_thread, NULL, interface, user_session);
 		pthread_create(&send_thread, NULL, send_f, user_session);
 		pthread_create(&receive_thread, NULL, receive, user_session);
-
     }
 
     return 0;
@@ -214,7 +206,6 @@ char *get_user_folder(const char *username){
 
 	return path;
 }
-
 
 char* list_files(const char *folder_path) {
     struct dirent *entry;
