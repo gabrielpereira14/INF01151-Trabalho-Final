@@ -10,8 +10,8 @@ typedef struct filenode {
     struct filenode *next;
 } FileNode;
 
-FileNode *FileLinkedList_push(FileNode *list, char* key, uint32_t file_hash);
-uint32_t *FileLinkedList_get(FileNode *list, const char* key);
+FileNode *FileLinkedList_push(FileNode *list, const char* key, uint32_t file_hash);
+FileNode *FileLinkedList_get(FileNode *list, const char* key);
 
 /*
 typedef struct {

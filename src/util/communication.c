@@ -173,14 +173,11 @@ Packet read_packet(int newsockfd) {
 
 
 void write_payload_to_file(char *filename, int socket) {
-    remove(filename);
-    
-
-    FILE *file = fopen(filename, "a+");
+    FILE *file = fopen(filename, "w");
     if (file == NULL) {
         printf("Error opening file!\n");
-        printf("\n%s",filename);
-        exit(1);
+        printf("\n%s", filename);
+        return;
     }
 
     Packet packet;
@@ -189,6 +186,10 @@ void write_payload_to_file(char *filename, int socket) {
         fwrite(packet._payload, packet.length, 1, file);
     } while (packet.seqn < packet.total_size - 1);
 
+    fflush(file);  // important!
+    if (fsync(fileno(file)) == -1) {
+        perror("fsync");
+    }
     fclose(file);
 }
 
@@ -232,7 +233,7 @@ void send_file(const int sockfd, char *file_path){
     if(file_ptr == NULL)
     {
         printf("Error opening file!");   
-        exit(1);             
+        return;           
     }
 
     size_t file_size = get_file_size(file_ptr);
@@ -276,11 +277,12 @@ char *receive_file(int socketfd, const char *path_to_save){
     char *filename = malloc(packet.length + 1);
     memcpy(filename, packet._payload, packet.length);
     filename[packet.length] = '\0';
-    char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s", path_to_save, filename);  
+    char *filepath = malloc(strlen(path_to_save) + 1 + strlen(filename) + 1);
+    sprintf(filepath, "%s/%s", path_to_save, filename); 
     write_payload_to_file(filepath,socketfd);
 
-    return filename;
+    free(filename);
+    return filepath;
 }
 
 

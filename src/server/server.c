@@ -10,10 +10,14 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <dirent.h>
+#include <time.h>
+#include <limits.h>
+
 
 #include "../util/communication.h"
 #include "../util/connectionManagement.h"
 #include "../util/contextHashTable.h"
+#include "../util/fileSync.h"
 
 #define MAX_USERNAME_LENGTH 32
 
@@ -28,7 +32,6 @@ void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
 void *receive(void* arg); // Recebe os arquivos do cliente
 void termination(int sig);
-
 
 // Variáveis definidas globalmente para poderem ser fechadas na função de terminação
 // -1 sempre é um fd inválido, e pode ser fechado sem problemas
@@ -174,9 +177,11 @@ int main() {
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
 
+		ContextThreads threads = {&interface_thread, &send_thread, &receive_thread};
+
 		Session *user_session = create_session(sock_interface, sock_receive, sock_send);
 
-		if(add_session_to_context(&contextTable, user_session, strdup(username)) != 0){
+		if(add_session_to_context(&contextTable, user_session, strdup(username), threads) != 0){
 			// MAXIMO DE SESSAO ATINGIDA, AVISA O USER
 			fprintf(stderr, "Maximo de sessoes atingidas para o user %s!\n", username);
 			free(user_session);
@@ -184,7 +189,7 @@ int main() {
 		}
 
 		pthread_create(&interface_thread, NULL, interface, user_session);
-		pthread_create(&send_thread, NULL, send_f, &sock_send);
+		pthread_create(&send_thread, NULL, send_f, user_session);
 		pthread_create(&receive_thread, NULL, receive, user_session);
 
     }
@@ -216,6 +221,7 @@ char *get_user_folder(const char *username){
 	return path;
 }
 
+
 char* list_files(const char *folder_path) {
     struct dirent *entry;
     DIR *dir = opendir(folder_path);
@@ -224,7 +230,7 @@ char* list_files(const char *folder_path) {
         return NULL;
     }
 
-    size_t buffer_size = 1024;
+    size_t buffer_size = 4096;
     char *result = malloc(buffer_size);
     if (result == NULL) {
         perror("malloc");
@@ -233,16 +239,32 @@ char* list_files(const char *folder_path) {
     }
     result[0] = '\0';
 
+    char path[PATH_MAX];
+    struct stat info;
+
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.' && 
-           (entry->d_name[1] == '\0' || 
+        if (entry->d_name[0] == '.' &&
+           (entry->d_name[1] == '\0' ||
            (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
             continue;
         }
 
-        size_t needed = strlen(result) + strlen(entry->d_name) + 4;
+        snprintf(path, sizeof(path), "%s/%s", folder_path, entry->d_name);
+        if (stat(path, &info) != 0) {
+            continue;
+        }
+
+        char mod_time[20], acc_time[20], chg_time[20];
+        strftime(mod_time, sizeof(mod_time), "%d/%m/%Y %H:%M:%S", localtime(&info.st_mtime));
+        strftime(acc_time, sizeof(acc_time), "%d/%m/%Y %H:%M:%S", localtime(&info.st_atime));
+        strftime(chg_time, sizeof(chg_time), "%d/%m/%Y %H:%M:%S", localtime(&info.st_ctime));
+
+        size_t needed = strlen(result) + strlen(entry->d_name) + strlen(mod_time)
+                      + strlen(acc_time) + strlen(chg_time) + 200;
         if (needed > buffer_size) {
-            buffer_size *= 2;
+            while (needed > buffer_size) {
+                buffer_size *= 2;
+            }
             char *new_result = realloc(result, buffer_size);
             if (new_result == NULL) {
                 perror("realloc");
@@ -253,9 +275,15 @@ char* list_files(const char *folder_path) {
             result = new_result;
         }
 
-		strcat(result, "  ");
+        strcat(result, "\nFile: ");
         strcat(result, entry->d_name);
-        strcat(result, "\n");
+        strcat(result, "\n    Modification time: ");
+        strcat(result, mod_time);
+        strcat(result, "\n          Access time: ");
+        strcat(result, acc_time);
+        strcat(result, "\n Change/creation time: ");
+        strcat(result, chg_time);
+        strcat(result, "\n\n");
     }
 
     closedir(dir);
@@ -264,25 +292,25 @@ char* list_files(const char *folder_path) {
 
 // Recebe e executa os comandos do usuário
 void *interface(void* arg) {
-	Session session = *((Session *) arg);
+	Session *session = (Session *) arg;
 
-	while (1)
+	while (session->active)
 	{
-		int command = receive_command(session.interface_socketfd);
+		int command = receive_command(session->interface_socketfd);
 
 		//fprintf(stderr, "Command: %d\n", command);
 
 		switch (command)
 		{
 		case PACKET_LIST:
-			char *folder_path = get_user_folder(session.user_context->username);
+			char *folder_path = get_user_folder(session->user_context->username);
 			char *files = list_files(folder_path);
 
 			int seqn = 0;
 			int total_packets = 1;
 			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
 
-			if(!send_packet(session.interface_socketfd,&packet)){
+			if(!send_packet(session->interface_socketfd,&packet)){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
 				free(files);
@@ -295,7 +323,7 @@ void *interface(void* arg) {
 		case PACKET_DOWNLOAD: {
 			//printf("DOWNLOAD requisitado\n");
 
-    		Packet packet = read_packet(session.interface_socketfd);
+    		Packet packet = read_packet(session->interface_socketfd);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name.\n");
         		break;
@@ -303,7 +331,7 @@ void *interface(void* arg) {
 
     		printf("Requested file: '%.*s'\n", packet.length, packet._payload);
 
-    		char *folder = get_user_folder(session.user_context->username);
+    		char *folder = get_user_folder(session->user_context->username);
     		char filepath[512];
     		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
 
@@ -314,7 +342,7 @@ void *interface(void* arg) {
     		}
 
     		printf("Sending file: %s\n", filepath);
-    		send_file(session.interface_socketfd, filepath);
+    		send_file(session->interface_socketfd, filepath);
 
     		free(folder);
     		break;
@@ -323,13 +351,13 @@ void *interface(void* arg) {
 		case PACKET_DELETE: {
     		//printf("DELETE requisitado\n");
 			
-    		Packet packet = read_packet(session.interface_socketfd);
+    		Packet packet = read_packet(session->interface_socketfd);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name\n");
         		break;
     		}
 
-    		char *folder = get_user_folder(session.user_context->username);
+    		char *folder = get_user_folder(session->user_context->username);
     		char filepath[512];
     		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
 
@@ -344,6 +372,17 @@ void *interface(void* arg) {
     		free(folder);
     		break;
 		}
+
+		case PACKET_EXIT:{
+			session->active = 0;
+			close(session->receive_socketfd);
+			close(session->interface_socketfd);
+			close(session->send_socketfd);
+			pthread_join(*session->user_context->threads.receive_thread, NULL); 
+			pthread_join(*session->user_context->threads.send_thread, NULL); 
+			
+			
+		}
 		
 		default:
 			break;
@@ -356,51 +395,80 @@ void *interface(void* arg) {
 
 // Envia os arquivos para o cliente
 void *send_f(void* arg) {
-	int socketfd = *((int *) arg);
+	Session *session = (Session *) arg;
+
+	while (session->active)
+	{
+		FileEntry file_entry = get_next_file_to_sync(&session->sync_buffer);
+		fprintf(stderr, "File sent to %d!", session->session_index);
+		send_file(session->send_socketfd, file_entry.filename);
+    	free_file_entry(file_entry); 
+	}
 		
 	pthread_exit(NULL);
 }
 
-int should_process_file(FileNode *list, const char *filename) {
+int should_process_file(FileNode *list, const char *filepath) {
+	fprintf(stderr, "File checked\n");
 	if (!list){
-		return 1;
-	}
-	
-	uint32_t *old_crc = FileLinkedList_get(list, filename);
-
-	if (!old_crc){
+		fprintf(stderr, "No files saved\n");
 		return 1;
 	}
 
-    uint32_t new_crc = crc32(filename);
+	FileNode *file_node = FileLinkedList_get(list, filepath);
 
-    return (new_crc != (*old_crc));
+	if (!file_node){
+		fprintf(stderr, "File not found\n");
+		return 1;
+	}
+
+	uint32_t old_crc = file_node->crc;
+    uint32_t new_crc = crc32(filepath);
+
+	fprintf(stderr, "Crc check %s: %lu vs  %lu\n", filepath, (unsigned long)new_crc, (unsigned long)old_crc);
+    return (new_crc != old_crc);
 }
 
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
-	Session session = *((Session *) arg);
-	
-	while (1)
+	Session *session = (Session *) arg;
+	int active = session->active;
+	while (active)
 	{
-		char *folder_path = get_user_folder(session.user_context->username);
+		char *folder_path = get_user_folder(session->user_context->username);
 
-		printf("%s", folder_path);
-
-		create_folder_if_not_exists(USER_FILES_FOLDER,session.user_context->username);
-		char *filename = receive_file(session.receive_socketfd, folder_path);
-
-		if(should_process_file(session.user_context->file_list, filename)){
-			if (add_file_to_context(&contextTable,filename,session.user_context->username) != 0){
-				fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
+		char *filepath = receive_file(session->receive_socketfd, folder_path);
+		
+		if(should_process_file(session->user_context->file_list, filepath)){
+			FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
+			if(!file_node){
+				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
+					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+				}
+			}else{
+				file_node->crc = crc32(filepath);
+				fprintf(stderr, "Crc updated");
 			}
-			fprintf(stderr, "tem que mandar o arquivo pros outros user\n");
-			//TODO: MANDAR ARQUIVO PRO USUARIO DA OUTRA SESSAO (session.user_context->sessions) PELA SOCKET DE SEND (receive pro usuario)
+
+			
+
+			for (FileNode *node = session->user_context->file_list; node != NULL; node = node->next) {
+				fprintf(stderr, "\n%s\n%lu\n", node->key, (unsigned long)node->crc);
+			}
+
+			
+
+			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
+
+			send_file_to_session(send_to_index, session->user_context, filepath);
 		}
 
-		free(filename);
+		free(filepath);
 		free(folder_path);
+		active = session->active;
 	}
+	
 	pthread_exit(NULL);
 }
 

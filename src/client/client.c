@@ -24,6 +24,7 @@
 #define MAX_ARGUMENT 115
 
 char sync_dir_path[PATH_MAX];
+pthread_mutex_t sync_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int create_sync_dir(){
     if (mkdir(sync_dir_path, 0755) == -1) {
@@ -84,6 +85,7 @@ int upload(const char *source_path){
         fprintf(stderr, "ERROR: Failed to construct destination path.\n");
         return 1;
     }
+    
 
     if (copy_file(source_path, dest_path) != 0) {
         fprintf(stderr,"ERROR: File copy failed.\n");
@@ -203,6 +205,16 @@ void delete(const char *filename, int socketfd) {
     printf("Exclusão solicitada.\n");
 }
 
+void close_client(int socketfd){
+    char *dummy = "";
+    Packet control_packet = create_control_packet(PACKET_EXIT, 1, dummy);
+
+    if (!send_packet(socketfd, &control_packet)) {
+        fprintf(stderr, "ERROR sending control packet (list_server)\n");
+        return;
+    }
+}
+
 void *start_console_input_thread(void *arg){
     int socketfd = *((int*) arg);
     char command[MAX_COMMAND] = "\0";
@@ -220,6 +232,7 @@ void *start_console_input_thread(void *arg){
 
         
         if (strcmp(command, "exit") == 0){
+            close_client(socketfd);
             printf("Client closed\n");
             break;
         }
@@ -252,6 +265,21 @@ void *start_console_input_thread(void *arg){
     pthread_exit(0);
 }
 
+void *start_file_receiver_thread(void* arg) {
+    int socket = *(int*)arg;
+
+    while (1)
+	{
+        //pthread_mutex_lock(&sync_mutex);
+		char *filepath = receive_file(socket, sync_dir_path);
+        fprintf(stderr, "receive %s\n", filepath);
+        //pthread_mutex_unlock(&sync_mutex);
+        fprintf(stderr,"File received!\n");
+		free(filepath);
+	}
+	pthread_exit(NULL);
+}
+
 void *start_directory_watcher_thread(void* arg) {
     int socket = *(int*)arg;
     int fd, wd;
@@ -267,7 +295,10 @@ void *start_directory_watcher_thread(void* arg) {
 
     do{
         usleep(200);
-        wd = inotify_add_watch(fd, sync_dir_path, IN_CREATE | IN_CLOSE_WRITE);
+        wd = inotify_add_watch(fd, sync_dir_path, 
+           // IN_CREATE 
+           // | 
+            IN_CLOSE_WRITE);
     }while(wd < 0);
   
 
@@ -293,17 +324,22 @@ void *start_directory_watcher_thread(void* arg) {
 
             snprintf(event_file_path, path_size, "%s/%s", sync_dir_path, event->name);
 
-            
+            /*
             if (event->mask & IN_CREATE) {
                 send_file(socket, event_file_path);
             }
+            */
 
             if (event->mask & IN_CLOSE_WRITE) {
+                fprintf(stderr, "inotify %s\n", event_file_path);
+                sleep(1);
+                //pthread_mutex_lock(&sync_mutex);
                 send_file(socket, event_file_path);
+                //pthread_mutex_unlock(&sync_mutex);
             }
 
             i += sizeof(struct inotify_event) + event->len;
-        }
+        } 
     }
 
     inotify_rm_watch(fd, wd);
@@ -370,6 +406,7 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
 
 int main(int argc, char* argv[]){ 
     char *username;
+    pthread_mutex_init(&sync_mutex, NULL);
     uint16_t console_socket_port = 4000;
 
     if (argc >= 2) {
@@ -423,9 +460,10 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
 
-    pthread_t console_thread, file_watcher_thread;
+    pthread_t console_thread, file_watcher_thread, receive_files_thread; 
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
+    pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
 
     pthread_join(console_thread, NULL);
     

@@ -1,12 +1,11 @@
 #include "./connectionManagement.h"
 #include "./contextHashTable.h"
 
-uint32_t crc32(const char *filename) {
+uint32_t crc32(const char *filepath) {
     uint8_t buffer[1024];
     uint32_t crc = 0xFFFFFFFF;
     size_t bytesRead;
-    FILE *file = fopen(filename, "rb");
-
+    FILE *file = fopen(filepath, "rb");
     if (!file) {
         perror("Error opening file");
         return 0;
@@ -41,7 +40,7 @@ UserContext *get_or_create_context(HashTable *table, char *username){
 
 int get_free_session_index(UserContext *context){
     for(int i = 0; i < MAX_SESSIONS; i++){
-        if (is_session_empty(&context->sessions[i]) != 0)
+        if (is_session_empty(context->sessions[i]) != 0)
         {
             return i;
         }
@@ -51,7 +50,7 @@ int get_free_session_index(UserContext *context){
 }
 
 
-int add_session_to_context(HashTable *table, Session* session, char *username){
+int add_session_to_context(HashTable *table, Session* session, char *username, ContextThreads threads){
     UserContext *context = get_or_create_context(table, username);
 
     int free_session_index = get_free_session_index(context);
@@ -59,8 +58,12 @@ int add_session_to_context(HashTable *table, Session* session, char *username){
     if (free_session_index == -1){
         return 1;
     }
+    session->session_index = free_session_index;
     session->user_context = context;
-    context->sessions[free_session_index] = *session;
+    session->active = 1;
+    init_file_sync_buffer(&session->sync_buffer);
+    context->sessions[free_session_index] = session;
+    context->threads = threads;
     return 0;
 }
 
@@ -76,6 +79,7 @@ int add_file_to_context(HashTable *table, const char *filename, char *username){
 
 Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd){
     Session *session = malloc(sizeof(Session));
+    session->session_index = -1;
     session->interface_socketfd = interface_socketfd;
     session->receive_socketfd = receive_socketfd;
     session->send_socketfd = send_socketfd;
@@ -86,9 +90,7 @@ Session *create_session(int interface_socketfd, int receive_socketfd, int send_s
 UserContext *create_context(char *username){
     UserContext *ctx = malloc(sizeof(UserContext));
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        ctx->sessions[i].interface_socketfd = -1;
-        ctx->sessions[i].receive_socketfd = -1;
-        ctx->sessions[i].send_socketfd = -1;
+        ctx->sessions[i] = NULL;
     }
 
     ctx->username = username;
@@ -98,8 +100,13 @@ UserContext *create_context(char *username){
 }
 
 int is_session_empty(Session *s) {
-    return s->interface_socketfd == -1 &&
-           s->receive_socketfd == -1 &&
-           s->send_socketfd == -1;
+    return s == NULL;
 }
 
+void send_file_to_session(int send_to_index, UserContext *context, char *filepath){
+    if(!is_session_empty(context->sessions[send_to_index])){
+        char *filename = basename(filepath);
+        add_file_to_sync_buffer(&context->sessions[send_to_index]->sync_buffer, context->username, filename, send_to_index);
+        //send_file(context->sessions[send_to_index]->send_socketfd, filename);
+    }
+}
