@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <time.h>
 
+#include "../util/common.h"
 #include "../util/communication.h"
 
 #define EVENT_BUF_LEN (1024 * (sizeof(struct inotify_event) + 16))
@@ -350,7 +351,6 @@ int set_sync_dir_path() {
     return 0;
 }
 
-
 struct sockaddr_in setup_socket_address(struct hostent *server, int port) {
     struct sockaddr_in sockaddr;
     sockaddr.sin_family = AF_INET;     
@@ -401,7 +401,7 @@ int main(int argc, char* argv[]) {
     if (argc >= 2) {
        username = argv[1]; 
     } else {
-        fprintf(stderr,"ERRO deve ser fornecido um nome de usuario\n");
+        fprintf(stderr, "ERRO deve ser fornecido um nome de usuario\n");
         exit(EXIT_FAILURE);
     }
 
@@ -412,7 +412,6 @@ int main(int argc, char* argv[]) {
     uint16_t send_socket_port = console_socket_port + 1;
     uint16_t receive_socket_port = console_socket_port + 2;
 
-
     if(set_sync_dir_path() != 0) {
         return EXIT_FAILURE;
     }
@@ -420,33 +419,33 @@ int main(int argc, char* argv[]) {
     struct hostent *server;
 	if ((server = gethostbyname("localhost")) == NULL) {
         fprintf(stderr,"ERRO servidor nao encontrado\n");
-        return 1;
+        return EXIT_FAILURE;
     }
 
     int sock_interface;
-    if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0) {
-        exit(EXIT_FAILURE);
+    if (connect_to_server(&sock_interface, server, console_socket_port, username) != 0) {
+        return EXIT_FAILURE;
     }
     
     int sock_send, sock_receive;
     if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        fprintf(stderr, "ERRO abrindo o socket se send\n");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "ERRO abrindo o socket de send\n");
+        return EXIT_FAILURE;
     }
     if ((sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         fprintf(stderr, "ERRO abrindo o socket de receive\n");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
     
     struct sockaddr_in send_serv_addr = setup_socket_address(server, send_socket_port);
     struct sockaddr_in receive_serv_addr = setup_socket_address(server, receive_socket_port);
 	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor de receive\n");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 	if (connect(sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor de send\n");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     pthread_t console_thread, file_watcher_thread, receive_files_thread; 

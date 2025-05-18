@@ -10,9 +10,15 @@
 
 #define PACKET_HEADER_SIZE 10
 #define PAYLOAD_SIZE 236
-#define TEST_PORT 4003
 
 #define MAX_SESSIONS 2
+
+// Ports em que o servidor escuta conecções
+const uint16_t SERVER_INTERFACE_PORT = 4000;
+const uint16_t SERVER_SEND_PORT = SERVER_INTERFACE_PORT + 1;
+const uint16_t SERVER_RECEIVE_PORT = SERVER_INTERFACE_PORT + 2;
+
+const uint16_t CLIENT_START_PORT = 4000;
 
 enum PacketTypes{
     PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT
@@ -37,8 +43,6 @@ typedef struct sentFile
     char *filepath;
 } SentFile;
 */
-
-
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size);
 Packet deserialize_packet(unsigned char *serialized_packet, size_t packet_size);

@@ -13,6 +13,7 @@
 #include <time.h>
 #include <limits.h>
 
+#include "../util/common.h"
 #include "../util/communication.h"
 #include "../util/connectionManagement.h"
 #include "../util/contextHashTable.h"
@@ -25,7 +26,6 @@ const int ANSWER_OK = 1;
 
 HashTable contextTable;
 
-void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
 void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
 void *receive(void* arg); // Recebe os arquivos do cliente
@@ -69,13 +69,13 @@ int main() {
 
     // Cria os sockets de espera de conecção
 	if ((sock_interface_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        perror_exit("ERRO abrindo o socket de espera de coneccoes de interface: ");
+        perror_exit("ERRO abrindo o socket de espera de coneccoes de interface");
 
 	if ((sock_send_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        perror_exit("ERRO abrindo o socket de espera por coneccao de send: ");
+        perror_exit("ERRO abrindo o socket de espera por coneccao de send");
 		
 	if ((sock_receive_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        perror_exit("ERRO abrindo o socket de espera por coneccao de receive: ");
+        perror_exit("ERRO abrindo o socket de espera por coneccao de receive");
 
     // Faz bind nos ports
 	struct sockaddr_in interface_serv_addr, send_serv_addr, receive_serv_addr;
@@ -105,11 +105,11 @@ int main() {
     bzero(&(send_serv_addr.sin_zero), 8);
 
 	if (bind(sock_receive_listen, (struct sockaddr *) &receive_serv_addr, sizeof(receive_serv_addr)) < 0){ 
-			perror_exit("ERRO vinulando o socket de espera da coneccao de receive: ");
+		perror_exit("ERRO vinulando o socket de espera da coneccao de receive");
 	}
 
 	if (bind(sock_send_listen, (struct sockaddr *) &send_serv_addr, sizeof(send_serv_addr)) < 0){ 
-		perror_exit("ERRO vinulando o socket de espera da coneccao de send: ");
+		perror_exit("ERRO vinulando o socket de espera da coneccao de send");
 	}
 	
 	// Começa a esperar pedidos de conecção
@@ -125,14 +125,14 @@ int main() {
 
         clilen = sizeof(struct sockaddr_in);
 	    if ((sock_interface = accept(sock_interface_listen, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
-		    perror_exit("ERRO ao aceitar coneccoes da interface: ");
+		    perror_exit("ERRO ao aceitar coneccoes da interface");
 
         // Verifica se a conecção é válida e responde para o cliente
 	    char username[MAX_USERNAME_LENGTH + 1];
 
         int request_size = read(sock_interface, username, MAX_USERNAME_LENGTH);
 	    if (request_size < 0) 
-		    perror_exit("ERRO lendo o pedido de coneccao do usuário: ");
+		    perror_exit("ERRO lendo o pedido de coneccao do usuário");
 
 		username[request_size] = '\0';
 		printf("Usuario: ");
@@ -144,7 +144,7 @@ int main() {
 
 		// Comunica pra o cliente fazer a conecção
 		if (write(sock_interface, &ANSWER_OK, sizeof(ANSWER_OK)) != sizeof(ANSWER_OK))
-			perror_exit("ERRO respondendo para o cliente: ");
+			perror_exit("ERRO respondendo para o cliente");
 
 		// Cria os socket de transferência
 	    int sock_send, sock_receive;
@@ -155,11 +155,11 @@ int main() {
 		// Aceita as conecções
 		listen(sock_receive_listen,5);
 		if ((sock_receive = accept(sock_receive_listen, (struct sockaddr *) &cli_receive_addr, &cli_receive_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de receive: ");
+		    perror_exit("ERRO aceitando a coneccao de receive");
 
 		listen(sock_send_listen,5);
 		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de send: ");
+		    perror_exit("ERRO aceitando a coneccao de send");
 		
         // Lança as threads
 		pthread_t interface_thread, send_thread, receive_thread;
@@ -181,11 +181,6 @@ int main() {
     }
 
     return 0;
-}
-
-void perror_exit(const char *msg) {
-	perror(msg);
-	exit(EXIT_FAILURE);
 }
 
 int receive_command(int socketfd){

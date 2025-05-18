@@ -92,7 +92,6 @@ Packet deserialize_packet(unsigned char *serialized_packet, size_t packet_size){
     return packet;
 }
 
-
 void print_packet(Packet packet) {
     printf("Packet - seqn: %i total_size: %i type: %i length: %i payload: %.*s\n",
            packet.seqn,
@@ -102,7 +101,6 @@ void print_packet(Packet packet) {
            packet.length,
            packet._payload ? packet._payload : "");
 }
-
 
 Packet create_data_packet(const uint16_t seqn,const uint32_t total_size,const uint16_t lenght, const char *payload){
     Packet packet;
@@ -125,8 +123,6 @@ Packet create_control_packet(const int type, const uint16_t lenght, const char *
 
     return packet;
 }
-
-
 
 Packet read_packet(int newsockfd) {
     unsigned char header[PACKET_HEADER_SIZE];
@@ -171,7 +167,6 @@ Packet read_packet(int newsockfd) {
     return pkt;
 }
 
-
 void write_payload_to_file(char *filename, int socket) {
     FILE *file = fopen(filename, "w");
     if (file == NULL) {
@@ -193,8 +188,6 @@ void write_payload_to_file(char *filename, int socket) {
     fclose(file);
 }
 
-
-
 size_t get_file_size(FILE *file_ptr){
     fseek(file_ptr, 0L, SEEK_END);
     size_t file_size = ftell(file_ptr);
@@ -214,7 +207,6 @@ int send_packet(int sockfd, const Packet *packet){
     return n >= 0;
 }
 
-
 char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
     char *buffer = malloc(chunk_size);
     if (!buffer) return NULL;
@@ -227,11 +219,10 @@ char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
 
     return buffer;
 }
-void send_file(const int sockfd, char *file_path){
 
+void send_file(const int sockfd, char *file_path) {
     FILE *file_ptr = fopen(file_path, "rb");
-    if(file_ptr == NULL)
-    {
+    if(file_ptr == NULL) {
         printf("Error opening file!");   
         return;           
     }
@@ -253,8 +244,7 @@ void send_file(const int sockfd, char *file_path){
         return;
     }
 
-    do
-    {
+    do {
         char *data = read_file_chunk(file_ptr, PAYLOAD_SIZE, &bytes_read);
         Packet packet = create_data_packet(current_packet,total_packet_amount, bytes_read, data);
 
@@ -272,7 +262,7 @@ void send_file(const int sockfd, char *file_path){
     fclose(file_ptr);
 }
 
-char *receive_file(int socketfd, const char *path_to_save){
+char *receive_file(int socketfd, const char *path_to_save) {
     Packet packet = read_packet(socketfd);
     char *filename = malloc(packet.length + 1);
     memcpy(filename, packet._payload, packet.length);
