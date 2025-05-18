@@ -375,13 +375,12 @@ void *interface(void* arg) {
 
 		case PACKET_EXIT:{
 			session->active = 0;
+			session->user_context->sessions[session->session_index] = NULL;
 			close(session->receive_socketfd);
 			close(session->interface_socketfd);
 			close(session->send_socketfd);
 			pthread_join(*session->user_context->threads.receive_thread, NULL); 
 			pthread_join(*session->user_context->threads.send_thread, NULL); 
-			
-			
 		}
 		
 		default:
@@ -432,8 +431,7 @@ int should_process_file(FileNode *list, const char *filepath) {
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
 	Session *session = (Session *) arg;
-	int active = session->active;
-	while (active)
+	while (session->active)
 	{
 		char *folder_path = get_user_folder(session->user_context->username);
 
@@ -466,7 +464,6 @@ void *receive(void* arg) {
 
 		free(filepath);
 		free(folder_path);
-		active = session->active;
 	}
 	
 	pthread_exit(NULL);
