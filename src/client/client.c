@@ -24,7 +24,6 @@
 #define MAX_ARGUMENT 115
 
 char sync_dir_path[PATH_MAX];
-pthread_mutex_t sync_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int create_sync_dir(){
     if (mkdir(sync_dir_path, 0755) == -1) {
@@ -270,9 +269,7 @@ void *start_file_receiver_thread(void* arg) {
 
     while (1)
 	{
-        pthread_mutex_lock(&sync_mutex);
 		char *filepath = receive_file(socket, sync_dir_path);
-        pthread_mutex_unlock(&sync_mutex);
         fprintf(stderr,"File received!\n");
 		free(filepath);
 	}
@@ -326,9 +323,7 @@ void *start_directory_watcher_thread(void* arg) {
 
             if (event->mask & IN_CLOSE_WRITE) {
                 sleep(1);
-                pthread_mutex_lock(&sync_mutex);
                 send_file(socket, event_file_path);
-                pthread_mutex_unlock(&sync_mutex);
             }
 
             i += sizeof(struct inotify_event) + event->len;
@@ -399,7 +394,6 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
 
 int main(int argc, char* argv[]){ 
     char *username;
-    pthread_mutex_init(&sync_mutex, NULL);
     uint16_t console_socket_port = 4000;
 
     if (argc >= 2) {
