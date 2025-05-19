@@ -394,6 +394,9 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
 
 int main(int argc, char* argv[]){ 
     char *username;
+    char hostname[20];
+
+    strcpy(hostname,"localhost");
     uint16_t console_socket_port = 4000;
 
     if (argc >= 2) {
@@ -404,8 +407,15 @@ int main(int argc, char* argv[]){
     }
 
     if(argc >= 3){
-        console_socket_port = atoi(argv[2]);
+        strcpy(hostname,argv[2]);
     }
+    
+
+    if(argc >= 4){
+        console_socket_port = atoi(argv[3]);
+    }
+
+
 
     uint16_t send_socket_port = console_socket_port + 1;
     uint16_t receive_socket_port = console_socket_port + 2;
@@ -416,7 +426,7 @@ int main(int argc, char* argv[]){
     }
 
     struct hostent *server;
-	if ((server = gethostbyname("localhost")) == NULL) {
+	if ((server = gethostbyname(hostname)) == NULL) {
         fprintf(stderr,"ERRO servidor nao encontrado\n");
         return 1;
     }
