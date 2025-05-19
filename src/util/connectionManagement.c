@@ -88,12 +88,7 @@ int add_file_to_context(HashTable *table, const char *filename, char *username){
         return 1;
     }
 
-    pthread_mutex_lock(&context->lock); 
-
     context->file_list = FileLinkedList_push(context->file_list, filename, crc32(filename));
-
-    pthread_mutex_unlock(&context->lock); 
-
     return 0;
 }
 
@@ -131,3 +126,5 @@ void send_file_to_session(int send_to_index, UserContext *context, char *filepat
                                 context->username, filepath, send_to_index);
     }
 }
+
+
