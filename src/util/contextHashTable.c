@@ -82,7 +82,6 @@ void HashTable_destroy(HashTable *table) {
     for (size_t i = 0; i < table->size; i++) {
         pthread_mutex_destroy(&table->locks[i]);
 
-        // Free linked list
         LinkedList node = table->array[i];
         while (node) {
             LinkedList next = node->next;

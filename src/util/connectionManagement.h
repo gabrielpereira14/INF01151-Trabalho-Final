@@ -34,7 +34,7 @@ typedef struct UserContext {
     FileNode *file_list;
     ContextThreads threads;
 
-    pthread_mutex_t lock;  // ✅ NEW: protects access to this context
+    pthread_mutex_t lock; 
 } UserContext;
 
 int add_session_to_context(HashTable *table, Session* session, char *username, ContextThreads threads);
