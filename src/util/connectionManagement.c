@@ -38,17 +38,6 @@ UserContext *get_or_create_context(HashTable *table, char *username){
     return context;
 }
 
-int get_free_session_index(UserContext *context){
-    for(int i = 0; i < MAX_SESSIONS; i++){
-        if (is_session_empty(context->sessions[i]) != 0)
-        {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
 
 int add_session_to_context(HashTable *table, Session* session, char *username, ContextThreads threads){
     UserContext *context = get_or_create_context(table, username);
