@@ -29,10 +29,12 @@ typedef struct ContextThreads{
 } ContextThreads;
 
 typedef struct UserContext {
-    Session *sessions[MAX_SESSIONS];
     char *username;
+    Session *sessions[MAX_SESSIONS];
     FileNode *file_list;
     ContextThreads threads;
+
+    pthread_mutex_t lock;  // ✅ NEW: protects access to this context
 } UserContext;
 
 int add_session_to_context(HashTable *table, Session* session, char *username, ContextThreads threads);

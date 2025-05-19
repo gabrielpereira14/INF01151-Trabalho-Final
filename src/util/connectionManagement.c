@@ -53,26 +53,47 @@ int get_free_session_index(UserContext *context){
 int add_session_to_context(HashTable *table, Session* session, char *username, ContextThreads threads){
     UserContext *context = get_or_create_context(table, username);
 
-    int free_session_index = get_free_session_index(context);
+    pthread_mutex_lock(&context->lock);
+
+    int free_session_index = -1;
+    for(int i = 0; i < MAX_SESSIONS; i++){
+        if (is_session_empty(context->sessions[i]) != 0) {
+            free_session_index = i;
+            break;
+        }
+    }
 
     if (free_session_index == -1){
+        pthread_mutex_unlock(&context->lock);
         return 1;
     }
+
     session->session_index = free_session_index;
     session->user_context = context;
     session->active = 1;
     init_file_sync_buffer(&session->sync_buffer);
+
     context->sessions[free_session_index] = session;
     context->threads = threads;
+
+    pthread_mutex_unlock(&context->lock);
+
     return 0;
 }
+
 
 int add_file_to_context(HashTable *table, const char *filename, char *username){
     UserContext *context = HashTable_search(table, username);
     if (!context){
         return 1;
     }
+
+    pthread_mutex_lock(&context->lock); 
+
     context->file_list = FileLinkedList_push(context->file_list, filename, crc32(filename));
+
+    pthread_mutex_unlock(&context->lock); 
+
     return 0;
 }
 
@@ -95,6 +116,7 @@ UserContext *create_context(char *username){
 
     ctx->username = username;
     ctx->file_list = NULL;
+    pthread_mutex_init(&ctx->lock, NULL);
 
     return ctx;
 }
@@ -105,6 +127,7 @@ int is_session_empty(Session *s) {
 
 void send_file_to_session(int send_to_index, UserContext *context, char *filepath){
     if(!is_session_empty(context->sessions[send_to_index])){
-        add_file_to_sync_buffer(&context->sessions[send_to_index]->sync_buffer, context->username, filepath, send_to_index);
+        add_file_to_sync_buffer(&context->sessions[send_to_index]->sync_buffer,
+                                context->username, filepath, send_to_index);
     }
 }
