@@ -374,8 +374,11 @@ void *interface(void* arg) {
 		}
 
 		case PACKET_EXIT:{
+
 			session->active = 0;
+			pthread_mutex_lock(&session->user_context->lock);
 			session->user_context->sessions[session->session_index] = NULL;
+    		pthread_mutex_unlock(&session->user_context->lock);
 			close(session->receive_socketfd);
 			close(session->interface_socketfd);
 			close(session->send_socketfd);
