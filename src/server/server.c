@@ -27,6 +27,7 @@ const int ANSWER_OK = 1;
 
 HashTable contextTable;
 
+
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
 void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
@@ -57,6 +58,75 @@ int create_folder_if_not_exists(const char *path, const char *folder_name) {
     }
 
     return 0;
+}
+
+
+void read_username(char *username, int sock_interface){
+	int request_size = read(sock_interface, username, MAX_USERNAME_LENGTH);
+	if (request_size < 0) 
+		perror_exit("ERRO lendo o pedido de coneccao do usuário: ");
+	username[request_size] = '\0';
+	fflush(stdout);
+}
+
+void initialize_user_session_and_threads(int sock_interface, int sock_receive, int sock_send, char *username) {
+	UserContext *context = get_or_create_context(&contextTable, strdup(username));
+
+	pthread_mutex_lock(&context->lock);
+	int free_session_index = find_free_session_index(context);
+	if (free_session_index == -1) {
+		fprintf(stderr, "Maximo de sessoes atingidas para o user %s!\n", username);
+		pthread_mutex_unlock(&context->lock);
+		return;
+	}
+
+	printf("Usuario %s conectado, sessão %d\n", username,free_session_index);
+
+	SessionSockets session_sockets = { sock_interface, sock_receive, sock_send };
+	Session *user_session = create_session(free_session_index, context, session_sockets);
+
+	pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
+    pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
+    pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
+
+	context->sessions[free_session_index] = user_session; 
+	pthread_mutex_unlock(&context->lock);
+	/*
+	fprintf(stderr,
+	"Usuario conectado threads:\n\tinterface - %lu\n\tsend - %lu\n\treceive - %lu\n",
+	(unsigned long) user_session->threads.interface_thread,
+	(unsigned long) user_session->threads.send_thread,
+	(unsigned long) user_session->threads.receive_thread);
+	*/
+}
+
+
+void handle_new_connection(int sock_interface){
+	    // Verifica se a conecção é válida e responde para o cliente
+	    char username[MAX_USERNAME_LENGTH + 1];
+		read_username(username, sock_interface);
+
+		// Comunica pra o cliente fazer a conecção
+		if (write(sock_interface, &ANSWER_OK, sizeof(ANSWER_OK)) != sizeof(ANSWER_OK))
+			perror_exit("ERRO respondendo para o cliente: ");
+
+		// Cria os socket de transferência
+	    int sock_send, sock_receive;
+		struct sockaddr_in cli_send_addr, cli_receive_addr;
+    	socklen_t cli_send_addr_len = sizeof(struct sockaddr_in);
+		socklen_t cli_receive_addr_len = sizeof(struct sockaddr_in);
+		
+		// Aceita as conecções
+		listen(sock_receive_listen,5);
+		if ((sock_receive = accept(sock_receive_listen, (struct sockaddr *) &cli_receive_addr, &cli_receive_addr_len)) == -1) 
+		    perror_exit("ERRO aceitando a coneccao de receive: ");
+
+		listen(sock_send_listen,5);
+		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
+		    perror_exit("ERRO aceitando a coneccao de send: ");
+		
+
+		initialize_user_session_and_threads(sock_interface,sock_receive,sock_send,username);
 }
 
 int main() {
@@ -93,7 +163,7 @@ int main() {
 	bzero(&(interface_serv_addr.sin_zero), 8);
 
    
-
+	srand((unsigned) time(NULL));
 	while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
         interface_socket_port = (rand() % 30000) + 2000;
         interface_serv_addr.sin_port = htons(interface_socket_port);
@@ -140,59 +210,9 @@ int main() {
 	    if ((sock_interface = accept(sock_interface_listen, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
 		    perror_exit("ERRO ao aceitar coneccoes da interface: ");
 
-        // Verifica se a conecção é válida e responde para o cliente
-	    char username[MAX_USERNAME_LENGTH + 1];
-
-        int request_size = read(sock_interface, username, MAX_USERNAME_LENGTH);
-	    if (request_size < 0) 
-		    perror_exit("ERRO lendo o pedido de coneccao do usuário: ");
-
-		username[request_size] = '\0';
-		printf("Usuario: ");
-		printf("%s", username);
-		printf("\n");
-		fflush(stdout);
-
-        // TODO: verificar se o usuário já tem dois dispositivos conectados
-
-		// Comunica pra o cliente fazer a conecção
-		if (write(sock_interface, &ANSWER_OK, sizeof(ANSWER_OK)) != sizeof(ANSWER_OK))
-			perror_exit("ERRO respondendo para o cliente: ");
-
-		// Cria os socket de transferência
-	    int sock_send, sock_receive;
-		struct sockaddr_in cli_send_addr, cli_receive_addr;
-    	socklen_t cli_send_addr_len = sizeof(struct sockaddr_in);
-		socklen_t cli_receive_addr_len = sizeof(struct sockaddr_in);
-		
-		// Aceita as conecções
-		listen(sock_receive_listen,5);
-		if ((sock_receive = accept(sock_receive_listen, (struct sockaddr *) &cli_receive_addr, &cli_receive_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de receive: ");
-
-		listen(sock_send_listen,5);
-		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de send: ");
-		
-        // Lança as threads
-		pthread_t interface_thread, send_thread, receive_thread;
-
-		ContextThreads threads = {&interface_thread, &send_thread, &receive_thread};
-
-		Session *user_session = create_session(sock_interface, sock_receive, sock_send);
-
-		if(add_session_to_context(&contextTable, user_session, strdup(username), threads) != 0){
-			// MAXIMO DE SESSAO ATINGIDA, AVISA O USER
-			fprintf(stderr, "Maximo de sessoes atingidas para o user %s!\n", username);
-			free(user_session);
-			continue;
-		}
-
-		pthread_create(&interface_thread, NULL, interface, user_session);
-		pthread_create(&send_thread, NULL, send_f, user_session);
-		pthread_create(&receive_thread, NULL, receive, user_session);
-
-    }
+		handle_new_connection(sock_interface);
+	}
+			
 
     return 0;
 }
@@ -290,13 +310,24 @@ char* list_files(const char *folder_path) {
     return result;
 }
 
+void signal_shutdown(Session *session) {
+    pthread_mutex_lock(&session->sync_buffer.lock);
+    pthread_cond_broadcast(&session->sync_buffer.not_empty);
+    pthread_cond_broadcast(&session->sync_buffer.not_full);
+    pthread_mutex_unlock(&session->sync_buffer.lock);
+}
+
+
 // Recebe e executa os comandos do usuário
 void *interface(void* arg) {
 	Session *session = (Session *) arg;
+	int interface_socket = session->sockets.interface_socketfd;
+	int send_socketfd = session->sockets.send_socketfd;
+	int receive_socketfd = session->sockets.receive_socketfd;
 
 	while (session->active)
 	{
-		int command = receive_command(session->interface_socketfd);
+		int command = receive_command(interface_socket);
 
 		//fprintf(stderr, "Command: %d\n", command);
 
@@ -310,7 +341,7 @@ void *interface(void* arg) {
 			int total_packets = 1;
 			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
 
-			if(!send_packet(session->interface_socketfd,&packet)){
+			if(!send_packet(interface_socket,&packet)){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
 				free(files);
@@ -323,7 +354,7 @@ void *interface(void* arg) {
 		case PACKET_DOWNLOAD: {
 			//printf("DOWNLOAD requisitado\n");
 
-    		Packet packet = read_packet(session->interface_socketfd);
+    		Packet packet = read_packet(interface_socket);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name.\n");
         		break;
@@ -342,7 +373,7 @@ void *interface(void* arg) {
     		}
 
     		printf("Sending file: %s\n", filepath);
-    		send_file(session->interface_socketfd, filepath);
+    		send_file(interface_socket, filepath);
 
     		free(folder);
     		break;
@@ -351,7 +382,7 @@ void *interface(void* arg) {
 		case PACKET_DELETE: {
     		//printf("DELETE requisitado\n");
 			
-    		Packet packet = read_packet(session->interface_socketfd);
+    		Packet packet = read_packet(interface_socket);
     		if (packet.length == 0 || !packet._payload) {
         		fprintf(stderr, "ERROR invalid file name\n");
         		break;
@@ -375,15 +406,32 @@ void *interface(void* arg) {
 
 		case PACKET_EXIT:{
 
+
+
+			//fprintf(stderr, "iniciando exit para a sessao %d\n",session->session_index);
 			session->active = 0;
+
+			signal_shutdown(session);
+			
+			close(receive_socketfd);
+			//fprintf(stderr, "fechou a socket the receive\n");
+			close(interface_socket);
+			//fprintf(stderr, "fechou a socket the interface\n");
+			close(send_socketfd);
+			//fprintf(stderr, "fechou a socket the send\n");
+
+			
+			//fprintf(stderr, "esperando thread: %lu\n", (unsigned long) session->threads.receive_thread);
+			pthread_join(session->threads.receive_thread, NULL); 
+			//fprintf(stderr, "receive_thread exited\n");
+			pthread_join(session->threads.send_thread, NULL); 
+			//fprintf(stderr, "send_thread exited\n");
+
 			pthread_mutex_lock(&session->user_context->lock);
 			session->user_context->sessions[session->session_index] = NULL;
     		pthread_mutex_unlock(&session->user_context->lock);
-			close(session->receive_socketfd);
-			close(session->interface_socketfd);
-			close(session->send_socketfd);
-			pthread_join(*session->user_context->threads.receive_thread, NULL); 
-			pthread_join(*session->user_context->threads.send_thread, NULL); 
+
+			
 		}
 		
 		default:
@@ -391,6 +439,7 @@ void *interface(void* arg) {
 		}
 	}
 
+	fprintf(stderr, "Sessao %d desconectada\n", session->session_index);
 	free(arg);
 	pthread_exit(NULL);
 }
@@ -398,11 +447,15 @@ void *interface(void* arg) {
 // Envia os arquivos para o cliente
 void *send_f(void* arg) {
 	Session *session = (Session *) arg;
+	int send_socket = session->sockets.send_socketfd;
 
 	while (session->active)
 	{
-		FileEntry file_entry = get_next_file_to_sync(&session->sync_buffer);
-		send_file(session->send_socketfd, file_entry.filename);
+		FileEntry file_entry = get_next_file_to_sync(session);
+		if(!file_entry.valid){
+			continue;
+		}
+		send_file(send_socket, file_entry.filename);
     	free_file_entry(file_entry); 
 	}
 		
@@ -430,14 +483,16 @@ int should_process_file(FileNode *list, const char *filepath) {
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
 	Session *session = (Session *) arg;
+	int receive_socket = session->sockets.receive_socketfd;
+
 	while (session->active)
 	{
 		char *folder_path = get_user_folder(session->user_context->username);
 
 		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
-		char *filepath = receive_file(session->receive_socketfd, folder_path);
+		char *filepath = receive_file(receive_socket, folder_path);
 		
-		if(should_process_file(session->user_context->file_list, filepath)){
+		if(session->active && should_process_file(session->user_context->file_list, filepath)){
 			FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
 			if(!file_node){
 				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
@@ -454,7 +509,7 @@ void *receive(void* arg) {
 		free(filepath);
 		free(folder_path);
 	}
-	
+
 	pthread_exit(NULL);
 }
 
@@ -467,3 +522,4 @@ void termination(int sig) {
 
 	exit(EXIT_SUCCESS);
 }
+

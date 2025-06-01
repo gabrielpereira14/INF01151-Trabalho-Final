@@ -4,7 +4,11 @@
 
 #define FILE_SYNC_BUFFER_SIZE 10 
 
+struct Session;
+typedef struct Session Session;
+
 typedef struct fileEntry {
+    int valid;
     char *username;
     int to_session_index;
     char *filename;
@@ -20,8 +24,8 @@ typedef struct FileSyncBuffer {
     pthread_cond_t not_full;
 } FileSyncBuffer;
 
-void add_file_to_sync_buffer(FileSyncBuffer *buffer, const char *username, const char *filename, int session_index);
-FileEntry get_next_file_to_sync(FileSyncBuffer *buffer);
+void add_file_to_sync_buffer(Session *session, const char *filename);
+FileEntry get_next_file_to_sync(Session *session);
 void free_file_entry(FileEntry file_entry);
 void init_file_sync_buffer(FileSyncBuffer *buffer);
 

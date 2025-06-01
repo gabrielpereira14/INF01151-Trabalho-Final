@@ -1,4 +1,5 @@
 #include "fileSync.h"
+#include "./connectionManagement.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,15 +13,17 @@ pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER;
 pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
 
-void add_file_to_sync_buffer(FileSyncBuffer *buffer, const char *username, const char *filename, int session_index) {
+void add_file_to_sync_buffer(Session *session, const char *filename) {
+    FileSyncBuffer *buffer = &session->sync_buffer;
     pthread_mutex_lock(&buffer->lock);
     while (buffer->count == FILE_SYNC_BUFFER_SIZE)
         pthread_cond_wait(&buffer->not_full, &buffer->lock);
 
     FileEntry *entry = &buffer->buffer[buffer->end];
-    entry->username = strdup(username);
+    entry->username = strdup(session->user_context->username);
     entry->filename = strdup(filename);
-    entry->to_session_index = session_index;
+    entry->to_session_index = session->session_index;
+    entry->valid = 1;
 
     buffer->end = (buffer->end + 1) % FILE_SYNC_BUFFER_SIZE;
     buffer->count++;
@@ -30,11 +33,20 @@ void add_file_to_sync_buffer(FileSyncBuffer *buffer, const char *username, const
 }
 
 
-FileEntry get_next_file_to_sync(FileSyncBuffer *buffer) {
-    pthread_mutex_lock(&buffer->lock);
+FileEntry get_next_file_to_sync(Session *session) {
+    FileSyncBuffer *buffer = &session->sync_buffer;
 
-    while (buffer->count == 0)
+    pthread_mutex_lock(&buffer->lock);
+    while (buffer->count == 0 && session->active) {
         pthread_cond_wait(&buffer->not_empty, &buffer->lock);
+    }
+    
+    if (!session->active) {
+        pthread_mutex_unlock(&buffer->lock);
+        FileEntry invalid = { .valid = 0 };
+        return invalid;
+    }
+
 
     FileEntry entry = buffer->buffer[buffer->start];
     buffer->start = (buffer->start + 1) % FILE_SYNC_BUFFER_SIZE;

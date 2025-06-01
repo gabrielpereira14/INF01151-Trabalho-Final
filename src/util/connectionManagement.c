@@ -38,38 +38,15 @@ UserContext *get_or_create_context(HashTable *table, char *username){
     return context;
 }
 
-
-int add_session_to_context(HashTable *table, Session* session, char *username, ContextThreads threads){
-    UserContext *context = get_or_create_context(table, username);
-
-    pthread_mutex_lock(&context->lock);
-
-    int free_session_index = -1;
+int find_free_session_index(UserContext *context){
     for(int i = 0; i < MAX_SESSIONS; i++){
         if (is_session_empty(context->sessions[i]) != 0) {
-            free_session_index = i;
+            return i;
             break;
         }
     }
-
-    if (free_session_index == -1){
-        pthread_mutex_unlock(&context->lock);
-        return 1;
-    }
-
-    session->session_index = free_session_index;
-    session->user_context = context;
-    session->active = 1;
-    init_file_sync_buffer(&session->sync_buffer);
-
-    context->sessions[free_session_index] = session;
-    context->threads = threads;
-
-    pthread_mutex_unlock(&context->lock);
-
-    return 0;
+    return -1;
 }
-
 
 int add_file_to_context(HashTable *table, const char *filename, char *username){
     UserContext *context = HashTable_search(table, username);
@@ -82,12 +59,18 @@ int add_file_to_context(HashTable *table, const char *filename, char *username){
 }
 
 
-Session *create_session(int interface_socketfd, int receive_socketfd, int send_socketfd){
+Session *create_session(int index, UserContext *context, SessionSockets sockets){
     Session *session = malloc(sizeof(Session));
-    session->session_index = -1;
-    session->interface_socketfd = interface_socketfd;
-    session->receive_socketfd = receive_socketfd;
-    session->send_socketfd = send_socketfd;
+    
+    session->session_index = index;
+     session->active = 1;
+
+    session->user_context = context;
+    session->sockets = sockets;
+
+    init_file_sync_buffer(&session->sync_buffer);
+   
+
     return session;
 }
 
@@ -111,8 +94,7 @@ int is_session_empty(Session *s) {
 
 void send_file_to_session(int send_to_index, UserContext *context, char *filepath){
     if(!is_session_empty(context->sessions[send_to_index])){
-        add_file_to_sync_buffer(&context->sessions[send_to_index]->sync_buffer,
-                                context->username, filepath, send_to_index);
+        add_file_to_sync_buffer(context->sessions[send_to_index], filepath);
     }
 }
 
