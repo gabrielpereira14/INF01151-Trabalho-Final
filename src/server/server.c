@@ -477,6 +477,27 @@ int should_process_file(FileNode *list, const char *filepath) {
     return (new_crc != old_crc);
 }
 
+void handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
+    create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
+	char *filepath = read_file_from_socket(receive_socket, folder_path);
+	
+	if(session->active && should_process_file(session->user_context->file_list, filepath)){
+		FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
+		if(!file_node){
+			if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
+				fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+			}
+		}else{
+			file_node->crc = crc32(filepath);
+		}
+		
+		int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
+		send_file_to_session(send_to_index, session->user_context, filepath);
+	}
+
+	free(filepath);
+}
+
 // Recebe os arquivos do cliente
 void *receive(void* arg) {
 	Session *session = (Session *) arg;
@@ -485,26 +506,7 @@ void *receive(void* arg) {
 	char *folder_path = get_user_folder(session->user_context->username);
 	while (session->active)
 	{
-		
-
-		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
-		char *filepath = read_file_from_socket(receive_socket, folder_path);
-		
-		if(session->active && should_process_file(session->user_context->file_list, filepath)){
-			FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
-			if(!file_node){
-				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
-					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
-				}
-			}else{
-				file_node->crc = crc32(filepath);
-			}
-			
-			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
-			send_file_to_session(send_to_index, session->user_context, filepath);
-		}
-
-		free(filepath);
+		handle_incoming_file(session,receive_socket,folder_path);
 	}
 	
 	free(folder_path);
