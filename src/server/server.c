@@ -325,6 +325,8 @@ void *interface(void* arg) {
 	int send_socketfd = session->sockets.send_socketfd;
 	int receive_socketfd = session->sockets.receive_socketfd;
 
+	char *folder_path = get_user_folder(session->user_context->username);
+
 	while (session->active)
 	{
 		int command = receive_command(interface_socket);
@@ -333,8 +335,7 @@ void *interface(void* arg) {
 
 		switch (command)
 		{
-		case PACKET_LIST:
-			char *folder_path = get_user_folder(session->user_context->username);
+		case PACKET_LIST:{
 			char *files = list_files(folder_path);
 
 			int seqn = 0;
@@ -347,8 +348,11 @@ void *interface(void* arg) {
 				free(files);
 			}
 
-			free(folder_path);
+			
 			free(files);
+		}
+			
+			
 			break;
 
 		case PACKET_DOWNLOAD: {
@@ -362,20 +366,18 @@ void *interface(void* arg) {
 
     		printf("Requested file: '%.*s'\n", packet.length, packet._payload);
 
-    		char *folder = get_user_folder(session->user_context->username);
+
     		char filepath[512];
-    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
+    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet.length, packet._payload);
 
     		if (access(filepath, F_OK) != 0) {
         		fprintf(stderr, "ERROR file not found: %s\n", filepath);
-        		free(folder);
         		break;
     		}
 
     		printf("Sending file: %s\n", filepath);
     		send_file(interface_socket, filepath);
 
-    		free(folder);
     		break;
 		}
 
@@ -388,9 +390,8 @@ void *interface(void* arg) {
         		break;
     		}
 
-    		char *folder = get_user_folder(session->user_context->username);
     		char filepath[512];
-    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder, packet.length, packet._payload);
+    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet.length, packet._payload);
 
     		if (access(filepath, F_OK) != 0) {
         		fprintf(stderr, "ERROR file not found: %s\n", filepath);
@@ -400,14 +401,10 @@ void *interface(void* arg) {
         		perror("[Servidor] ERROR deleting file");
     		}
 
-    		free(folder);
     		break;
 		}
 
 		case PACKET_EXIT:{
-
-
-
 			//fprintf(stderr, "iniciando exit para a sessao %d\n",session->session_index);
 			session->active = 0;
 
@@ -430,7 +427,6 @@ void *interface(void* arg) {
 			pthread_mutex_lock(&session->user_context->lock);
 			session->user_context->sessions[session->session_index] = NULL;
     		pthread_mutex_unlock(&session->user_context->lock);
-
 			
 		}
 		
@@ -438,6 +434,7 @@ void *interface(void* arg) {
 			break;
 		}
 	}
+	free(folder_path);
 
 	fprintf(stderr, "Sessao %d desconectada\n", session->session_index);
 	free(arg);
@@ -485,9 +482,10 @@ void *receive(void* arg) {
 	Session *session = (Session *) arg;
 	int receive_socket = session->sockets.receive_socketfd;
 
+	char *folder_path = get_user_folder(session->user_context->username);
 	while (session->active)
 	{
-		char *folder_path = get_user_folder(session->user_context->username);
+		
 
 		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
 		char *filepath = receive_file(receive_socket, folder_path);
@@ -507,9 +505,9 @@ void *receive(void* arg) {
 		}
 
 		free(filepath);
-		free(folder_path);
 	}
-
+	
+	free(folder_path);
 	pthread_exit(NULL);
 }
 
