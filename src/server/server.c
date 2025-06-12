@@ -488,7 +488,7 @@ void *receive(void* arg) {
 		
 
 		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
-		char *filepath = receive_file(receive_socket, folder_path);
+		char *filepath = read_file_from_socket(receive_socket, folder_path);
 		
 		if(session->active && should_process_file(session->user_context->file_list, filepath)){
 			FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);

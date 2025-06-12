@@ -180,7 +180,7 @@ void download(const char *filename, int socketfd) {
     }
 
     // SAlva o arquivo no diretorio atual
-    receive_file(socketfd, ".");
+    read_file_from_socket(socketfd, ".");
     printf("Arquivo '%s' salvo.\n", filename);
 }
 
@@ -269,7 +269,7 @@ void *start_file_receiver_thread(void* arg) {
 
     while (1)
 	{
-		char *filepath = receive_file(socket, sync_dir_path);
+		char *filepath = read_file_from_socket(socket, sync_dir_path);
         fprintf(stderr,"File received!\n");
 		free(filepath);
 	}
