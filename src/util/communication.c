@@ -133,16 +133,27 @@ Packet read_packet(int newsockfd) {
     ssize_t n = 0;
     size_t total_read = 0;
 
+    // Read header
     while (total_read < PACKET_HEADER_SIZE) {
         n = read(newsockfd, header + total_read, PACKET_HEADER_SIZE - total_read);
-        if (n <= 0) {
-            perror("read failed or closed");
-            Packet empty = {0};
+        if (n == 0) {
+            Packet closed_pkt = {0};
+            closed_pkt.type = PACKET_CONNECTION_CLOSED; 
+            return closed_pkt;
+        }
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                fprintf(stderr, "read: No data available (non-blocking).\n");
+            } else {
+                perror("read error on header");
+            }
+            Packet empty = {0}; // Return an empty packet for errors
             return empty;
         }
         total_read += n;
     }
-    uint16_t payload_length = header[8] | (header[9] << 8);
+
+    uint16_t payload_length = header[8] | (header[9] << 8); // Assuming little-endian for payload length
     size_t total_packet_size = PACKET_HEADER_SIZE + payload_length;
 
     unsigned char *buffer = malloc(total_packet_size);
@@ -157,8 +168,18 @@ Packet read_packet(int newsockfd) {
     size_t payload_read = 0;
     while (payload_read < payload_length) {
         n = read(newsockfd, buffer + PACKET_HEADER_SIZE + payload_read, payload_length - payload_read);
-        if (n <= 0) {
-            perror("read failed or closed");
+        if (n == 0) {
+            free(buffer);
+            Packet closed_pkt = {0};
+            closed_pkt.type = PACKET_CONNECTION_CLOSED;
+            return closed_pkt;
+        }
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                fprintf(stderr, "read: No data available (non-blocking) during payload.\n");
+            } else {
+                perror("read error on payload");
+            }
             free(buffer);
             Packet empty = {0};
             return empty;

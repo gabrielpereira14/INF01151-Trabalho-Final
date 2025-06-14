@@ -1,0 +1,361 @@
+
+#include <netdb.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+#include <arpa/inet.h> 
+#include <sys/socket.h>  
+#include <netinet/in.h>
+
+#include "./serverRoles.h"
+#include "communication.h"
+#include "replica.h"
+
+volatile enum ServerMode global_server_mode = UNKNOWN_MODE;
+volatile int global_shutdown_flag = 0;
+pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+void send_heartbeat_to_replicas() {
+    ReplicaEvent event;
+    create_heartbeat_event(&event);
+    int notified_replicas = notify_replicas(&event);
+    free_event(&event);
+    fprintf(stderr, "Heartbeat to %d replicas!\n", notified_replicas);
+}
+
+int manager_heartbeats_stopped() {
+    return 0;
+}
+
+int run_election(int id) {
+    return 0;
+}
+
+
+int has_data(int socketfd, int timeout_ms) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(socketfd, &read_fds);
+
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int result = select(socketfd + 1, &read_fds, NULL, NULL, &timeout);
+    if (result < 0) {
+        perror("select failed");
+        return -1;
+    }
+
+    return result;  // >0 means readable
+}
+
+
+void *replica_listener_thread(void *arg) {
+    ListenerArgs *listener_args = (ListenerArgs *)arg;
+    int port = listener_args->port;
+
+    int listen_sockfd, newsockfd;
+    struct sockaddr_in sockaddr, cli_addr;
+    socklen_t clilen;
+
+    printf("[Manager Listener Thread] Starting on port %d.\n", port);
+
+    if ((listen_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("[Manager Listener Thread] ERROR opening socket");
+        free(listener_args);
+        return NULL; 
+    }
+
+    sockaddr.sin_family = AF_INET;
+    sockaddr.sin_port = htons(port);
+    sockaddr.sin_addr.s_addr = INADDR_ANY;
+    bzero(&(sockaddr.sin_zero), 8); 
+
+
+    if (bind(listen_sockfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
+        perror("[Manager Listener Thread] ERROR on binding");
+        close(listen_sockfd);
+        free(listener_args);
+        return NULL; 
+    }
+
+    if (listen(listen_sockfd, 5) == -1) { 
+        perror("[Manager Listener Thread] ERROR on listen");
+        close(listen_sockfd);
+        free(listener_args);
+        return NULL; 
+    }
+
+    printf("[Manager Listener Thread] Listening for replica connections on port %d...\n", port);
+
+    while (1) {
+        pthread_mutex_lock(&mode_change_mutex);
+        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP_MANAGER);
+        pthread_mutex_unlock(&mode_change_mutex);
+
+        if (should_exit) {
+            printf("[Manager Listener Thread] Exiting loop due to mode change or global shutdown.\n");
+            break; 
+        }
+        int replica_connected = has_data(listen_sockfd, 1000);
+        if ( replica_connected > 0){
+             clilen = sizeof(cli_addr);
+            newsockfd = accept(listen_sockfd, (struct sockaddr *)&cli_addr, &clilen);
+
+            if (newsockfd == -1) {
+                if (errno == EINTR) {
+                    // Interrupted by a signal, retry accept
+                    continue;
+                }
+                perror("[Manager Listener Thread] ERROR on accept");
+                break;
+            }
+
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &(cli_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
+            fprintf(stderr, "[Manager Listener Thread] Accepted new replica connection from %s:%hu (fd %d)\n",
+                   ip_str, ntohs(cli_addr.sin_port), newsockfd);
+
+            if(!add_replica(newsockfd, 0)){
+                fprintf(stderr, "[Manager Listener Thread] Error adding replica");
+            }
+        } else if (replica_connected < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("[Manager Listener Thread] Select error");
+            break; 
+        } else if (replica_connected == 0) {
+            // Timeout occurred, no new connections, loop back to check flags again
+            continue;
+        }
+    }
+
+    pthread_exit(NULL);
+}
+
+void *heartbeat_monitor_thread_main(void *arg) {
+    int id = *(int*)arg;
+    printf("[Backup Thread] Heartbeat monitor started for Backup ID %d.\n", id);
+
+    while (1) {
+        pthread_mutex_lock(&mode_change_mutex);
+        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP);
+        pthread_mutex_unlock(&mode_change_mutex);
+
+        if (should_exit) {
+            printf("[Backup Thread] Heartbeat monitor exiting due to mode change or shutdown.\n");
+            break;
+        }
+
+        if (manager_heartbeats_stopped()) {
+            pthread_mutex_lock(&mode_change_mutex);
+            if (global_server_mode == BACKUP) { 
+                printf("[Backup %d] Manager heartbeats stopped. Initiating failover.\n", id);
+                if (run_election(id)) { 
+                    global_server_mode = BACKUP_MANAGER; // Change role
+                    printf("[Backup %d] Role changed to MANAGER.\n", id);
+                } else {
+                    printf("[Backup %d] Failed to win election. Remaining BACKUP.\n", id);
+                }
+            }
+            pthread_mutex_unlock(&mode_change_mutex);
+        }
+
+        sleep(1); 
+    }
+    return NULL;
+}
+
+
+void *connect_to_server_thread(void *arg) {
+    ConnectionArgs *conn_args = (ConnectionArgs *)arg;
+    int id = conn_args->id;
+    const char *hostname = conn_args->hostname;
+    int port = conn_args->port;
+
+    int socketfd = -1;
+
+
+    printf("[Backup %d Connection Thread] Attempting to connect to %s:%d.\n", id, hostname, port);
+
+
+    while (1) {
+        pthread_mutex_lock(&mode_change_mutex);
+        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP);
+        pthread_mutex_unlock(&mode_change_mutex);
+
+        if (should_exit) {
+            printf("[Backup %d Connection Thread] Exiting due to mode change or global shutdown.\n", id);
+            break; // Exit the connection/communication loop
+        }
+
+        struct hostent *server;
+        if ((server = gethostbyname(hostname)) == NULL) {
+            fprintf(stderr,"ERRO servidor nao encontrado\n");
+            continue;
+        }
+
+        if ((socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+            fprintf(stderr, "ERRO abrindo o socket da interface\n");
+            continue;
+        }
+
+        struct sockaddr_in sockaddr;
+        memset(&sockaddr, 0, sizeof(sockaddr));
+        sockaddr.sin_family = AF_INET;
+        sockaddr.sin_port = htons(port);
+        memcpy(&sockaddr.sin_addr, server->h_addr, server->h_length);
+
+        if (connect(socketfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
+            fprintf(stderr,"ERRO conectando ao servidor\n");
+            close(socketfd);
+            socketfd = -1;
+            sleep(1);
+            continue;
+        }
+
+        printf("[Backup %d Connection Thread] Successfully connected to %s:%d (socket fd: %d).\n", id, hostname, port, socketfd);
+
+        while (1) {
+            pthread_mutex_lock(&mode_change_mutex);
+            int comm_should_exit = global_shutdown_flag || (global_server_mode != BACKUP);
+            pthread_mutex_unlock(&mode_change_mutex);
+
+            if (comm_should_exit) {
+                printf("[Backup %d Connection Thread] Communication loop exiting due to mode change or shutdown.\n", id);
+                break; // Exit inner communication loop
+            }
+
+            if (has_data(socketfd, 1000) > 0) {
+                Packet packet = read_packet(socketfd);
+                switch (packet.type) {
+                    case PACKET_REPLICA_MSG:{
+                        ReplicaEvent event = deserialize_replica_event(packet._payload);
+                        if (event.type == EVENT_HEARTBEAT)
+                        {
+                            fprintf(stderr, "[Backup %d Connection Thread] Heartbeat received.\n",id);
+                        }
+                        break;
+                    }
+                    case PACKET_CONNECTION_CLOSED:{
+                        fprintf(stderr, "[Backup %d Connection Thread] Connection closed.\n",id);
+                        comm_should_exit = 1;
+                        break;
+                    }
+                        
+                    default :{
+                        fprintf(stderr, "[Backup %d Connection Thread] Unsupported packet type: %d\n",id, packet.type);
+                        break;
+                    }
+                }
+                
+            }
+        }
+
+
+        printf("[Backup %d Connection Thread] Disconnected from manager or communication loop exited. Closing socket %d.\n", id, socketfd);
+        close(socketfd);
+    }
+
+    printf("[Backup %d Connection Thread] Thread fully exiting.\n", id);
+    free(conn_args);
+    return NULL;
+}
+
+
+void run_manager_server(int id, int listen_port) {
+    printf("Server ID %d: Running as MANAGER.\n", id);
+    global_server_mode = BACKUP_MANAGER;
+    pthread_t listener_tid;
+    ListenerArgs *args = (ListenerArgs *)malloc(sizeof(ListenerArgs));
+    if (args == NULL) {
+        perror("Failed to allocate listener arguments");
+        exit(EXIT_FAILURE);
+    }
+    args->port = listen_port;
+
+    int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, args);
+    if (rc != 0) {
+        fprintf(stderr, "Error launching replica listener thread: %s\n", strerror(rc));
+        free(args);
+        exit(EXIT_FAILURE);
+    }
+    pthread_detach(listener_tid);
+
+    printf("Manager server (ID %d) is performing its main duties...\n", id);
+    while (1) {
+        pthread_mutex_lock(&mode_change_mutex);
+        int should_exit_role = global_shutdown_flag || (global_server_mode != BACKUP_MANAGER);
+        pthread_mutex_unlock(&mode_change_mutex);
+
+        if (should_exit_role) {
+            printf("[Manager %d] Exiting MANAGER role loop.\n", id);
+            break;
+        }
+        send_heartbeat_to_replicas();
+        sleep(2);
+    }
+    printf("Manager server (ID %d) is cleaning up resources.\n", id);
+}
+
+void run_backup_server(int id, const char *manager_ip, int manager_port) {
+    printf("Server ID %d: Running as BACKUP.\n", id);
+    printf("Manager to connect to: %s:%d\n", manager_ip, manager_port);
+    global_server_mode = BACKUP;
+
+    pthread_t manager_conn_tid;
+    ConnectionArgs *conn_args = (ConnectionArgs *)malloc(sizeof(ConnectionArgs)); // Dynamically allocate args
+    if (conn_args == NULL) {
+        perror("Failed to allocate connection arguments");
+        exit(EXIT_FAILURE);
+    }
+    conn_args->id = id;
+    strncpy(conn_args->hostname, manager_ip, sizeof(conn_args->hostname) - 1);
+    conn_args->hostname[sizeof(conn_args->hostname) - 1] = '\0';
+    conn_args->port = manager_port;
+
+    int rc = pthread_create(&manager_conn_tid, NULL, connect_to_server_thread, conn_args);
+    if (rc != 0) {
+        fprintf(stderr, "Error launching manager connection thread: %s\n", strerror(rc));
+        free(conn_args);
+        exit(EXIT_FAILURE);
+    }
+    pthread_detach(manager_conn_tid); // Detach the connection thread
+
+    // Launch heartbeat monitor thread (if not already running)
+    pthread_t heartbeat_tid;
+    int *backup_id_ptr = malloc(sizeof(int));
+    if (backup_id_ptr == NULL) {
+        perror("Failed to allocate ID for heartbeat thread");
+        exit(EXIT_FAILURE);
+    }
+    *backup_id_ptr = id;
+
+    rc = pthread_create(&heartbeat_tid, NULL, heartbeat_monitor_thread_main, backup_id_ptr);
+    if (rc != 0) {
+        fprintf(stderr, "Error launching heartbeat monitor thread: %s\n", strerror(rc));
+        free(backup_id_ptr);
+        exit(EXIT_FAILURE);
+    }
+    pthread_detach(heartbeat_tid);
+
+    printf("Backup server (ID %d) is performing its main duties...\n", id);
+    while (1) {
+        pthread_mutex_lock(&mode_change_mutex);
+        int should_exit_role = global_shutdown_flag || (global_server_mode != BACKUP);
+        pthread_mutex_unlock(&mode_change_mutex);
+
+        if (should_exit_role) {
+            printf("[Backup %d] Exiting BACKUP role loop.\n", id);
+            break;
+        }
+        sleep(1);
+    }
+    printf("Backup server (ID %d) is cleaning up resources.\n", id);
+}

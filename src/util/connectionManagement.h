@@ -1,5 +1,7 @@
 #ifndef CONNECTION_MANEGEMENT_HEADER
 #define CONNECTION_MANEGEMENT_HEADER
+
+#include <netinet/in.h>
 #include <pthread.h>
 #include "./fileSync.h"
 #include "./communication.h"
@@ -29,11 +31,11 @@ typedef struct Session {
     int session_index;
     int active;
 
+    struct sockaddr_in device_address; 
     SessionSockets sockets;
     SessionThreads threads;
-
+    
     FileSyncBuffer sync_buffer;
-
     struct UserContext *user_context;
 } Session;
 
@@ -50,7 +52,7 @@ typedef struct UserContext {
 UserContext *get_or_create_context(HashTable *table, char *username);
 int find_free_session_index(UserContext *context);
 int add_file_to_context(HashTable *table, const char *filename, char *username);
-Session *create_session(int index, UserContext *context, SessionSockets sockets);
+Session *create_session(int index, UserContext *context, SessionSockets sockets, struct sockaddr_in device_address);
 UserContext *create_context(char *username);
 int is_session_empty(Session *s);
 uint32_t crc32(const char *filepath);

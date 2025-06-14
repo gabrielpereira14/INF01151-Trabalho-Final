@@ -1,5 +1,6 @@
 #include "./connectionManagement.h"
 #include "./contextHashTable.h"
+#include <netinet/in.h>
 
 uint32_t crc32(const char *filepath) {
     uint8_t buffer[1024];
@@ -59,18 +60,18 @@ int add_file_to_context(HashTable *table, const char *filename, char *username){
 }
 
 
-Session *create_session(int index, UserContext *context, SessionSockets sockets){
+Session *create_session(int index, UserContext *context, SessionSockets sockets, struct sockaddr_in device_address){
     Session *session = malloc(sizeof(Session));
     
     session->session_index = index;
-     session->active = 1;
+    session->active = 1;
 
+    session->device_address = device_address;
     session->user_context = context;
     session->sockets = sockets;
 
     init_file_sync_buffer(&session->sync_buffer);
    
-
     return session;
 }
 

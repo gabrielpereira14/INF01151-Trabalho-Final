@@ -18,20 +18,26 @@
 #include "../util/connectionManagement.h"
 #include "../util/contextHashTable.h"
 #include "../util/fileSync.h"
+#include "../util/replica.h"
+#include "../util/serverRoles.h"
 
 #define MAX_USERNAME_LENGTH 32
 
 #define USER_FILES_FOLDER "user files"
 const int ANSWER_OK = 1;
 
-
 HashTable contextTable;
 
+int server_mode = -1;
+char manager_ip[256] = "";
+int manager_port = -1;
+int id = -1;
 
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
 void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
 void *receive(void* arg); // Recebe os arquivos do cliente
+void *replication_management(void *args);
 void termination(int sig);
 
 // Variáveis definidas globalmente para poderem ser fechadas na função de terminação
@@ -69,7 +75,7 @@ void read_username(char *username, int sock_interface){
 	fflush(stdout);
 }
 
-void initialize_user_session_and_threads(int sock_interface, int sock_receive, int sock_send, char *username) {
+void initialize_user_session_and_threads(struct sockaddr_in device_address, int sock_interface, int sock_receive, int sock_send, char *username) {
 	UserContext *context = get_or_create_context(&contextTable, strdup(username));
 
 	pthread_mutex_lock(&context->lock);
@@ -83,7 +89,12 @@ void initialize_user_session_and_threads(int sock_interface, int sock_receive, i
 	printf("Usuario %s conectado, sessão %d\n", username,free_session_index);
 
 	SessionSockets session_sockets = { sock_interface, sock_receive, sock_send };
-	Session *user_session = create_session(free_session_index, context, session_sockets);
+	Session *user_session = create_session(free_session_index, context, session_sockets, device_address);
+
+	ReplicaEvent event;
+	create_client_connected_event(&event , user_session, device_address);
+	notify_replicas(&event);
+	free_event(&event);
 
 	pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
     pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
@@ -126,16 +137,66 @@ void handle_new_connection(int sock_interface){
 		    perror_exit("ERRO aceitando a coneccao de send: ");
 		
 
-		initialize_user_session_and_threads(sock_interface,sock_receive,sock_send,username);
+		initialize_user_session_and_threads(cli_send_addr, sock_interface, sock_receive, sock_send, username);
 }
 
-int main() {
+void parse_server_arguments(int argc, char *argv[]) {
+    if (argc < 3) { 
+        fprintf(stderr, "Uso: ./server ID -MODO [ip porta]\n");
+		fprintf(stderr, "ID = numero natural\n");
+        fprintf(stderr, "MODO = M ou B (manager ou backup, respectivamente)\n");
+        fprintf(stderr, "ip e porta desnecessario se MODO = M\n");
+        exit(1);
+    }
+
+    id = atoi(argv[1]);
+    if (id <= 0) { 
+        fprintf(stderr, "ID do servidor inválido: %s (deve ser um número inteiro positivo)\n", argv[1]);
+        exit(1);
+    }
+
+    if (strcmp(argv[2], "-M") == 0) {
+        server_mode = BACKUP_MANAGER;
+    } else if (strcmp(argv[2], "-B") == 0) {
+        server_mode = BACKUP;
+
+        if (argc < 5) { 
+            fprintf(stderr, "Necessário especificar ip e porta quando MODO = B\n");
+            exit(1);
+		}
+
+        strncpy(manager_ip, argv[3], 255);
+        manager_ip[255] = '\0'; 
+
+        manager_port = atoi(argv[4]);
+        if (manager_port <= 0) { 
+            fprintf(stderr, "Porta inválida: %s\n", argv[4]);
+            exit(1);
+        }
+
+    } else {
+        fprintf(stderr, "Modo inválido: %s\n", argv[2]);
+        fprintf(stderr, "Uso: ./server ID -MODO [ip porta]\n");
+		fprintf(stderr, "ID = numero natural\n");
+        fprintf(stderr, "MODO = M ou B (manager ou backup, respectivamente)\n");
+        fprintf(stderr, "ip e porta desnecessario se MODO = M\n");
+        exit(1);
+    }
+}
+
+
+int main(int argc, char* argv[]) {
+
+	parse_server_arguments(argc, argv);
+
+	
+
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
 
 	contextTable = HashTable_create(30); 
             
-	
+
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
 	}
@@ -174,6 +235,22 @@ int main() {
 	
 	uint16_t receive_socket_port = interface_socket_port + 1;
 	uint16_t send_socket_port = interface_socket_port + 2;
+	uint16_t replica_socket_port = interface_socket_port + 3;
+
+
+	pthread_t replication_thread;
+
+	if (server_mode == BACKUP_MANAGER)
+	{
+		run_manager_server(id, replica_socket_port);
+	}else if (server_mode == BACKUP)
+	{
+		run_backup_server(id, manager_ip, manager_port);
+	}else
+	{
+		fprintf(stderr, "Unknown server mode.\n");
+		exit(1);
+	}
 
 
 	receive_serv_addr.sin_family = AF_INET;
@@ -216,6 +293,7 @@ int main() {
 
     return 0;
 }
+
 
 void perror_exit(const char *msg) {
 	perror(msg);

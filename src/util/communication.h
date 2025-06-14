@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <libgen.h>
+#include <errno.h>
 
 #define PACKET_HEADER_SIZE 10
 #define PAYLOAD_SIZE 236
@@ -15,7 +16,7 @@
 #define MAX_SESSIONS 2
 
 enum PacketTypes{
-    PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT
+    PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT, PACKET_REPLICA_MSG, PACKET_CONNECTION_CLOSED
 };
 
 typedef struct packet{ 
@@ -37,8 +38,6 @@ typedef struct sentFile
     char *filepath;
 } SentFile;
 */
-
-
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size);
 Packet deserialize_packet(unsigned char *serialized_packet, size_t packet_size);
