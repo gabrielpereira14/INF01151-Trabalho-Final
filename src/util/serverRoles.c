@@ -185,9 +185,10 @@ void *connect_to_server_thread(void *arg) {
     printf("[Backup %d Connection Thread] Attempting to connect to %s:%d.\n", id, hostname, port);
 
 
+    int connection_closed = 0;
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP);
+        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP) || connection_closed;
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -221,10 +222,10 @@ void *connect_to_server_thread(void *arg) {
         }
 
         printf("[Backup %d Connection Thread] Successfully connected to %s:%d (socket fd: %d).\n", id, hostname, port, socketfd);
-
+        
         while (1) {
             pthread_mutex_lock(&mode_change_mutex);
-            int comm_should_exit = global_shutdown_flag || (global_server_mode != BACKUP);
+            int comm_should_exit = global_shutdown_flag || (global_server_mode != BACKUP) || connection_closed;
             pthread_mutex_unlock(&mode_change_mutex);
 
             if (comm_should_exit) {
@@ -245,7 +246,7 @@ void *connect_to_server_thread(void *arg) {
                     }
                     case PACKET_CONNECTION_CLOSED:{
                         fprintf(stderr, "[Backup %d Connection Thread] Connection closed.\n",id);
-                        comm_should_exit = 1;
+                        connection_closed = 1;
                         break;
                     }
                         
@@ -257,8 +258,6 @@ void *connect_to_server_thread(void *arg) {
                 
             }
         }
-
-
         printf("[Backup %d Connection Thread] Disconnected from manager or communication loop exited. Closing socket %d.\n", id, socketfd);
         close(socketfd);
     }
