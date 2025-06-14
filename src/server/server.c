@@ -1,5 +1,6 @@
 #include "./serverCommon.h"
 #include "./serverRoles.h"
+#include <stdio.h>
 
 const int ANSWER_OK = 1;
 
@@ -68,21 +69,26 @@ void initialize_user_session_and_threads(struct sockaddr_in device_address, int 
 	SessionSockets session_sockets = { sock_interface, sock_receive, sock_send };
 	Session *user_session = create_session(free_session_index, context, session_sockets, device_address);
 
-	pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
-    pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
-    pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
-
-	context->sessions[free_session_index] = user_session; 
-	pthread_mutex_unlock(&context->lock);
+	
 
 	if (server_mode == BACKUP_MANAGER)
 	{
+		pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
+		pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
+		pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
+		
+		fprintf(stderr, "Notifying replicas\n");
 		ReplicaEvent event;
 		create_client_connected_event(&event , user_session, device_address);
 		notify_replicas(&event);
 		free_event(&event);
 	}
 
+
+	context->sessions[free_session_index] = user_session; 
+	pthread_mutex_unlock(&context->lock);
+
+	
 	HashTable_print(&contextTable);
 }
 

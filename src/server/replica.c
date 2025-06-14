@@ -69,33 +69,21 @@ int replica_list_contains(int socketfd) {
     return contains;
 }
 
-int replica_list_remove(int socketfd) {
-    pthread_mutex_lock(&replica_list_mutex);
-
-    ReplicaNode *current = head;
-    ReplicaNode *prev = NULL;
-
-    if (current != NULL && current->socketfd == socketfd) {
-        head = current->next;
-        free(current);
-        pthread_mutex_unlock(&replica_list_mutex);
-        return 1;
+ReplicaNode* replica_list_remove_node(ReplicaNode **head_ptr, ReplicaNode *prev, ReplicaNode *node_to_remove) {
+    if (node_to_remove == NULL) {
+        return NULL;
     }
 
-    while (current != NULL && current->socketfd != socketfd) {
-        prev = current;
-        current = current->next;
+    if (prev == NULL) {
+        *head_ptr = node_to_remove->next;
+    } else {
+        prev->next = node_to_remove->next;
     }
 
-    if (current == NULL) {
-        pthread_mutex_unlock(&replica_list_mutex); 
-        return 0;
-    }
+    close(node_to_remove->socketfd); 
+    free(node_to_remove);
 
-    prev->next = current->next;
-    free(current);
-    pthread_mutex_unlock(&replica_list_mutex);
-    return 1;
+    return (prev == NULL) ? *head_ptr : prev->next;
 }
 
 void replica_list_print_all() {
@@ -135,18 +123,32 @@ int notify_replicas(ReplicaEvent* event){
     Packet packet = create_control_packet(PACKET_REPLICA_MSG, strlen(serialized_event), serialized_event);
 
     pthread_mutex_lock(&replica_list_mutex);
+
     ReplicaNode *current = head;
-    while (current != NULL) {
-        if (!send_packet(current->socketfd, &packet)) {
-            fprintf(stderr, "Error sending packet to replica. (socketfd: %d)\n", current->socketfd);
+    ReplicaNode *prev = NULL;
+
+     while (current != NULL) {
+        int return_code = send_packet(current->socketfd, &packet);
+        
+        if (return_code == OK) {
+            notified_replicas++;
+            prev = current;
+            current = current->next;
+        } else { 
+            fprintf(stderr, "Error sending packet to replica %d (socketfd: %d).\n", current->id, current->socketfd);
+
+            if (return_code == SOCKET_CLOSED) {
+                fprintf(stderr, "Replica %d closed the connection.\n", current->id);
+                current = replica_list_remove_node(&head, prev, current);
+
+            } else {
+                prev = current;
+                current = current->next;
+            }
         }
-        notified_replicas++;
-        current = current->next;
     }
     pthread_mutex_unlock(&replica_list_mutex); 
-
     free(serialized_event);
-
     return notified_replicas;
 }
 

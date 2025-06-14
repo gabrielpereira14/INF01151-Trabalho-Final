@@ -8,12 +8,17 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <errno.h>
+#include <sys/socket.h>
 
 #define PACKET_HEADER_SIZE 10
 #define PAYLOAD_SIZE 236
 #define TEST_PORT 4003
 
 #define MAX_SESSIONS 2
+
+enum SendPacketErrors{
+    OK, SOCKET_CLOSED
+};
 
 enum PacketTypes{
     PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT, PACKET_REPLICA_MSG, PACKET_CONNECTION_CLOSED

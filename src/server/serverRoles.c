@@ -1,6 +1,8 @@
 #include "./serverRoles.h"
 #include "./serverCommon.h"
 #include <bits/pthreadtypes.h>
+#include <pthread.h>
+#include <unistd.h>
 
 volatile enum ServerMode global_server_mode = UNKNOWN_MODE;
 volatile int global_shutdown_flag = 0;
@@ -39,7 +41,7 @@ int has_data(int socketfd, int timeout_ms) {
         return -1;
     }
 
-    return result;  // >0 means readable
+    return result; 
 }
 
 
@@ -227,6 +229,7 @@ void *connect_to_server_thread(void *arg) {
 
                         case EVENT_CLIENT_CONNECTED:
                             initialize_user_session_and_threads(event.device_address, -1, -1, -1, event.username);
+                            //exit(1);
                             break;
                         case EVENT_CLIENT_DISCONNECTED:
 
@@ -241,9 +244,6 @@ void *connect_to_server_thread(void *arg) {
                             //fprintf(stderr, "[Backup %d Connection Thread] Heartbeat received.\n",id);
                             break;
                         }
-     
-
-                            
                         break;
                     }
                     case PACKET_CONNECTION_CLOSED:{
@@ -259,10 +259,12 @@ void *connect_to_server_thread(void *arg) {
                 }
                 
             }
+            sleep(1);
         }
         printf("[Backup %d Connection Thread] Disconnected from manager or communication loop exited. Closing socket %d.\n", id, socketfd);
-        close(socketfd);
+        
     }
+    close(socketfd);
 
     printf("[Backup %d Connection Thread] Thread fully exiting.\n", id);
     free(backup_args);
@@ -298,6 +300,7 @@ void *manage_replicas(void *args) {
         sleep(2);
     }
     printf("Manager server (ID %d) is cleaning up resources.\n", manager_args->id);
+    pthread_exit(NULL);
 }
 
 void *run_as_backup(void* arg) {

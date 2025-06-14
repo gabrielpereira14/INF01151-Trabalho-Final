@@ -147,13 +147,13 @@ Packet read_packet(int newsockfd) {
             } else {
                 perror("read error on header");
             }
-            Packet empty = {0}; // Return an empty packet for errors
+            Packet empty = {0};
             return empty;
         }
         total_read += n;
     }
 
-    uint16_t payload_length = header[8] | (header[9] << 8); // Assuming little-endian for payload length
+    uint16_t payload_length = header[8] | (header[9] << 8);
     size_t total_packet_size = PACKET_HEADER_SIZE + payload_length;
 
     unsigned char *buffer = malloc(total_packet_size);
@@ -230,9 +230,17 @@ int send_packet(int sockfd, const Packet *packet){
 
     if (!serialized_packet) return 0;
 
-    int n = write(sockfd, serialized_packet, serialized_packet_len);
+    ssize_t bytes_sent = send(sockfd, serialized_packet, serialized_packet_len, MSG_NOSIGNAL); // Or whatever flags you need
+    if (bytes_sent == -1) {
+        if (errno == EPIPE) {
+            return SOCKET_CLOSED; 
+        } else {
+            perror("send"); 
+            return -1;
+        }
+    }
     
-    return n >= 0;
+    return OK;
 }
 
 
