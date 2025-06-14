@@ -3,7 +3,19 @@
 
 #include <pthread.h> 
 #include <errno.h>
+#include <netdb.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+#include <arpa/inet.h> 
+#include <sys/socket.h>  
+#include <netinet/in.h>
 
+
+#include "../util/communication.h"
 #include "./replica.h"
 
 enum ServerMode{ UNKNOWN_MODE, BACKUP, BACKUP_MANAGER };
@@ -20,20 +32,11 @@ typedef struct {
     int port;
 } ManagerArgs;
 
-
-
 extern volatile enum ServerMode global_server_mode;
 extern volatile int global_shutdown_flag;
 extern pthread_mutex_t mode_change_mutex; 
 
-
-
 void *replica_listener_thread(void *arg);
-void *heartbeat_monitor_thread_main(void *arg); // New for backup role
-
-
-void *manage_replicas(void *args);
-void *run_as_backup(void *arg);
-
+void *heartbeat_monitor_thread_main(void *arg);
 
 #endif 

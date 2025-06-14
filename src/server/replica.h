@@ -11,10 +11,9 @@
 #include <arpa/inet.h>
 
 
-#include "./communication.h"
-#include "./connectionManagement.h"
-#include "./fileSync.h"
-#include "./communication.h"
+#include "../util/communication.h"
+#include "../util/connectionManagement.h"
+#include "../util/fileSync.h"
 
 enum EventTypes { EVENT_CLIENT_CONNECTED, EVENT_CLIENT_DISCONNECTED, EVENT_FILE_UPLOADED, EVENT_REPLICA_ADDED, EVENT_HEARTBEAT};
 

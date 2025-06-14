@@ -1,18 +1,6 @@
-
-#include <netdb.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/ucontext.h>
-#include <unistd.h>
-#include <arpa/inet.h> 
-#include <sys/socket.h>  
-#include <netinet/in.h>
-
 #include "./serverRoles.h"
-#include "communication.h"
-#include "replica.h"
+#include "./serverCommon.h"
+#include <bits/pthreadtypes.h>
 
 volatile enum ServerMode global_server_mode = UNKNOWN_MODE;
 volatile int global_shutdown_flag = 0;
@@ -24,7 +12,7 @@ void send_heartbeat_to_replicas() {
     create_heartbeat_event(&event);
     int notified_replicas = notify_replicas(&event);
     free_event(&event);
-    fprintf(stderr, "Heartbeat to %d replicas!\n", notified_replicas);
+    //fprintf(stderr, "Heartbeat to %d replicas!\n", notified_replicas);
 }
 
 int manager_heartbeats_stopped() {
@@ -235,10 +223,27 @@ void *connect_to_server_thread(void *arg) {
                 switch (packet.type) {
                     case PACKET_REPLICA_MSG:{
                         ReplicaEvent event = deserialize_replica_event(packet._payload);
-                        if (event.type == EVENT_HEARTBEAT)
-                        {
-                            fprintf(stderr, "[Backup %d Connection Thread] Heartbeat received.\n",id);
+                        switch (event.type) {
+
+                        case EVENT_CLIENT_CONNECTED:
+                            initialize_user_session_and_threads(event.device_address, -1, -1, -1, event.username);
+                            break;
+                        case EVENT_CLIENT_DISCONNECTED:
+
+                            break;
+                        case EVENT_FILE_UPLOADED:
+                            
+                            break;
+                        case EVENT_REPLICA_ADDED:
+                            //add_replica(-1, -1);
+                            break;
+                        case EVENT_HEARTBEAT:
+                            //fprintf(stderr, "[Backup %d Connection Thread] Heartbeat received.\n",id);
+                            break;
                         }
+     
+
+                            
                         break;
                     }
                     case PACKET_CONNECTION_CLOSED:{

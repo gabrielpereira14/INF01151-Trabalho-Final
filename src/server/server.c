@@ -1,29 +1,6 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <signal.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <dirent.h>
-#include <time.h>
-#include <limits.h>
+#include "./serverCommon.h"
+#include "./serverRoles.h"
 
-
-#include "../util/communication.h"
-#include "../util/connectionManagement.h"
-#include "../util/contextHashTable.h"
-#include "../util/fileSync.h"
-#include "../util/replica.h"
-#include "../util/serverRoles.h"
-
-#define MAX_USERNAME_LENGTH 32
-
-#define USER_FILES_FOLDER "user files"
 const int ANSWER_OK = 1;
 
 HashTable contextTable;
@@ -91,24 +68,22 @@ void initialize_user_session_and_threads(struct sockaddr_in device_address, int 
 	SessionSockets session_sockets = { sock_interface, sock_receive, sock_send };
 	Session *user_session = create_session(free_session_index, context, session_sockets, device_address);
 
-	ReplicaEvent event;
-	create_client_connected_event(&event , user_session, device_address);
-	notify_replicas(&event);
-	free_event(&event);
-
 	pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
     pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
     pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
 
 	context->sessions[free_session_index] = user_session; 
 	pthread_mutex_unlock(&context->lock);
-	/*
-	fprintf(stderr,
-	"Usuario conectado threads:\n\tinterface - %lu\n\tsend - %lu\n\treceive - %lu\n",
-	(unsigned long) user_session->threads.interface_thread,
-	(unsigned long) user_session->threads.send_thread,
-	(unsigned long) user_session->threads.receive_thread);
-	*/
+
+	if (server_mode == BACKUP_MANAGER)
+	{
+		ReplicaEvent event;
+		create_client_connected_event(&event , user_session, device_address);
+		notify_replicas(&event);
+		free_event(&event);
+	}
+
+	HashTable_print(&contextTable);
 }
 
 
