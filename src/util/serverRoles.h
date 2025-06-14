@@ -29,8 +29,8 @@ void *replica_listener_thread(void *arg);
 void *heartbeat_monitor_thread_main(void *arg); // New for backup role
 
 
-void run_manager_server(int id, int listen_port);
-void run_backup_server(int id, const char *manager_ip, int manager_port);
+void manage_replicas(int id, int listen_port);
+void run_as_backup(int id, const char *manager_ip, int manager_port);
 
 
 #endif 

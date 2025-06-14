@@ -242,10 +242,10 @@ int main(int argc, char* argv[]) {
 
 	if (server_mode == BACKUP_MANAGER)
 	{
-		run_manager_server(id, replica_socket_port);
+		manage_replicas(id, replica_socket_port);
 	}else if (server_mode == BACKUP)
 	{
-		run_backup_server(id, manager_ip, manager_port);
+		run_as_backup(id, manager_ip, manager_port);
 	}else
 	{
 		fprintf(stderr, "Unknown server mode.\n");

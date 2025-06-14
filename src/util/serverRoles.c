@@ -222,7 +222,7 @@ void *connect_to_server_thread(void *arg) {
         }
 
         printf("[Backup %d Connection Thread] Successfully connected to %s:%d (socket fd: %d).\n", id, hostname, port, socketfd);
-        
+
         while (1) {
             pthread_mutex_lock(&mode_change_mutex);
             int comm_should_exit = global_shutdown_flag || (global_server_mode != BACKUP) || connection_closed;
@@ -268,7 +268,7 @@ void *connect_to_server_thread(void *arg) {
 }
 
 
-void run_manager_server(int id, int listen_port) {
+void manage_replicas(int id, int listen_port) {
     printf("Server ID %d: Running as MANAGER.\n", id);
     global_server_mode = BACKUP_MANAGER;
     pthread_t listener_tid;
@@ -303,7 +303,7 @@ void run_manager_server(int id, int listen_port) {
     printf("Manager server (ID %d) is cleaning up resources.\n", id);
 }
 
-void run_backup_server(int id, const char *manager_ip, int manager_port) {
+void run_as_backup(int id, const char *manager_ip, int manager_port) {
     printf("Server ID %d: Running as BACKUP.\n", id);
     printf("Manager to connect to: %s:%d\n", manager_ip, manager_port);
     global_server_mode = BACKUP;
