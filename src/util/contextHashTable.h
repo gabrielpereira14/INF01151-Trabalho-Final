@@ -29,5 +29,6 @@ HashTable HashTable_create(size_t size);
 // para inserir
 UserContext *HashTable_insert(HashTable *table, char* key, UserContext *value);
 UserContext *HashTable_search(HashTable *table, char* key);
+void HashTable_print(HashTable *table);
 
 #endif

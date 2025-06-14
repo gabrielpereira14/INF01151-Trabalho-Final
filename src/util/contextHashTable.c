@@ -94,3 +94,35 @@ void HashTable_destroy(HashTable *table) {
     free(table->array);
     free(table->locks);
 }
+
+void HashTable_print(HashTable *table) {
+    if (!table) {
+        printf("HashTable is NULL\n");
+        return;
+    }
+
+    printf("HashTable contents:\n");
+    for (size_t i = 0; i < table->size; i++) {
+        pthread_mutex_lock(&table->locks[i]);
+
+        LinkedList node = table->array[i];
+        if (!node) {
+            pthread_mutex_unlock(&table->locks[i]);
+            continue;
+        }
+
+        printf("Bucket %zu:\n", i);
+        while (node) {
+            printf("  Key: %s", node->key);
+            if (node->value) {
+                // Print more about value if needed
+                printf(", UserContext at %p", (void*)node->value);
+                // Example: printf(", username: %s", node->value->username);
+            }
+            printf("\n");
+            node = node->next;
+        }
+
+        pthread_mutex_unlock(&table->locks[i]);
+    }
+}
