@@ -5,17 +5,17 @@ SRC_DIR = src
 OBJ_DIR = obj
 
 CLIENT_SRC = $(SRC_DIR)/client/client.c
-SERVER_SRC = $(SRC_DIR)/server/server.c
+CLIENT_OBJ = $(OBJ_DIR)/client/client.o
+CLIENT_BIN = ./client
+
+SERVER_SRC_DIR = $(SRC_DIR)/server
+SERVER_SRC = $(wildcard $(SERVER_SRC_DIR)/*.c)
+SERVER_OBJ = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SERVER_SRC))
+SERVER_BIN = ./server
 
 UTIL_SRC_DIR = $(SRC_DIR)/util
 UTIL_SRC = $(wildcard $(UTIL_SRC_DIR)/*.c)
 UTIL_OBJ = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(UTIL_SRC))
-
-CLIENT_OBJ = $(OBJ_DIR)/client/client.o
-SERVER_OBJ = $(OBJ_DIR)/server/server.o
-
-CLIENT_BIN = ./client
-SERVER_BIN = ./server
 
 all: $(CLIENT_BIN) $(SERVER_BIN)
 
