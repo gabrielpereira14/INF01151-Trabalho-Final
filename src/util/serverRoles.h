@@ -13,24 +13,27 @@ typedef struct {
     int id;
     char hostname[256];
     int port;           
-} ConnectionArgs;
+} BackupArgs;
+
+typedef struct { 
+    int id;
+    int port;
+} ManagerArgs;
+
 
 
 extern volatile enum ServerMode global_server_mode;
 extern volatile int global_shutdown_flag;
 extern pthread_mutex_t mode_change_mutex; 
 
-typedef struct { 
-    int port;
-} ListenerArgs;
 
 
 void *replica_listener_thread(void *arg);
 void *heartbeat_monitor_thread_main(void *arg); // New for backup role
 
 
-void manage_replicas(int id, int listen_port);
-void run_as_backup(int id, const char *manager_ip, int manager_port);
+void *manage_replicas(void *args);
+void *run_as_backup(void *arg);
 
 
 #endif 

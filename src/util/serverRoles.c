@@ -56,8 +56,8 @@ int has_data(int socketfd, int timeout_ms) {
 
 
 void *replica_listener_thread(void *arg) {
-    ListenerArgs *listener_args = (ListenerArgs *)arg;
-    int port = listener_args->port;
+    ManagerArgs *manager_args = (ManagerArgs *)arg;
+    int port = manager_args->port;
 
     int listen_sockfd, newsockfd;
     struct sockaddr_in sockaddr, cli_addr;
@@ -67,8 +67,8 @@ void *replica_listener_thread(void *arg) {
 
     if ((listen_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("[Manager Listener Thread] ERROR opening socket");
-        free(listener_args);
-        return NULL; 
+        free(manager_args);
+        pthread_exit(NULL);
     }
 
     sockaddr.sin_family = AF_INET;
@@ -80,15 +80,15 @@ void *replica_listener_thread(void *arg) {
     if (bind(listen_sockfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
         perror("[Manager Listener Thread] ERROR on binding");
         close(listen_sockfd);
-        free(listener_args);
-        return NULL; 
+        free(manager_args);
+        pthread_exit(NULL);
     }
 
     if (listen(listen_sockfd, 5) == -1) { 
         perror("[Manager Listener Thread] ERROR on listen");
         close(listen_sockfd);
-        free(listener_args);
-        return NULL; 
+        free(manager_args);
+        pthread_exit(NULL); 
     }
 
     printf("[Manager Listener Thread] Listening for replica connections on port %d...\n", port);
@@ -169,23 +169,20 @@ void *heartbeat_monitor_thread_main(void *arg) {
 
         sleep(1); 
     }
-    return NULL;
+    pthread_exit(NULL);
 }
 
 
 void *connect_to_server_thread(void *arg) {
-    ConnectionArgs *conn_args = (ConnectionArgs *)arg;
-    int id = conn_args->id;
-    const char *hostname = conn_args->hostname;
-    int port = conn_args->port;
+    BackupArgs *backup_args = (BackupArgs *)arg;
+    int id = backup_args->id;
+    const char *hostname = backup_args->hostname;
+    int port = backup_args->port;
 
     int socketfd = -1;
-
-
     printf("[Backup %d Connection Thread] Attempting to connect to %s:%d.\n", id, hostname, port);
-
-
     int connection_closed = 0;
+
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
         int should_exit = global_shutdown_flag || (global_server_mode != BACKUP) || connection_closed;
@@ -263,66 +260,53 @@ void *connect_to_server_thread(void *arg) {
     }
 
     printf("[Backup %d Connection Thread] Thread fully exiting.\n", id);
-    free(conn_args);
-    return NULL;
+    free(backup_args);
+    pthread_exit(NULL);
 }
 
 
-void manage_replicas(int id, int listen_port) {
-    printf("Server ID %d: Running as MANAGER.\n", id);
+void *manage_replicas(void *args) {
+    ManagerArgs *manager_args = (ManagerArgs *) args;
+    printf("Server ID %d: Running as MANAGER.\n", manager_args->id);
     global_server_mode = BACKUP_MANAGER;
     pthread_t listener_tid;
-    ListenerArgs *args = (ListenerArgs *)malloc(sizeof(ListenerArgs));
-    if (args == NULL) {
-        perror("Failed to allocate listener arguments");
-        exit(EXIT_FAILURE);
-    }
-    args->port = listen_port;
 
-    int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, args);
+    int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, manager_args);
     if (rc != 0) {
         fprintf(stderr, "Error launching replica listener thread: %s\n", strerror(rc));
-        free(args);
+        free(manager_args);
         exit(EXIT_FAILURE);
     }
     pthread_detach(listener_tid);
 
-    printf("Manager server (ID %d) is performing its main duties...\n", id);
+    printf("Manager server (ID %d) is performing its main duties...\n", manager_args->id);
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
         int should_exit_role = global_shutdown_flag || (global_server_mode != BACKUP_MANAGER);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit_role) {
-            printf("[Manager %d] Exiting MANAGER role loop.\n", id);
+            printf("[Manager %d] Exiting MANAGER role loop.\n", manager_args->id);
             break;
         }
         send_heartbeat_to_replicas();
         sleep(2);
     }
-    printf("Manager server (ID %d) is cleaning up resources.\n", id);
+    printf("Manager server (ID %d) is cleaning up resources.\n", manager_args->id);
 }
 
-void run_as_backup(int id, const char *manager_ip, int manager_port) {
-    printf("Server ID %d: Running as BACKUP.\n", id);
-    printf("Manager to connect to: %s:%d\n", manager_ip, manager_port);
+void *run_as_backup(void* arg) {
+    BackupArgs *backup_args = (BackupArgs *) arg;
+
+    printf("Server ID %d: Running as BACKUP.\n", backup_args->id);
+    printf("Manager to connect to: %s:%d\n", backup_args->hostname, backup_args->port);
     global_server_mode = BACKUP;
 
     pthread_t manager_conn_tid;
-    ConnectionArgs *conn_args = (ConnectionArgs *)malloc(sizeof(ConnectionArgs)); // Dynamically allocate args
-    if (conn_args == NULL) {
-        perror("Failed to allocate connection arguments");
-        exit(EXIT_FAILURE);
-    }
-    conn_args->id = id;
-    strncpy(conn_args->hostname, manager_ip, sizeof(conn_args->hostname) - 1);
-    conn_args->hostname[sizeof(conn_args->hostname) - 1] = '\0';
-    conn_args->port = manager_port;
 
-    int rc = pthread_create(&manager_conn_tid, NULL, connect_to_server_thread, conn_args);
+    int rc = pthread_create(&manager_conn_tid, NULL, connect_to_server_thread, backup_args);
     if (rc != 0) {
         fprintf(stderr, "Error launching manager connection thread: %s\n", strerror(rc));
-        free(conn_args);
         exit(EXIT_FAILURE);
     }
     pthread_detach(manager_conn_tid); // Detach the connection thread
@@ -334,7 +318,7 @@ void run_as_backup(int id, const char *manager_ip, int manager_port) {
         perror("Failed to allocate ID for heartbeat thread");
         exit(EXIT_FAILURE);
     }
-    *backup_id_ptr = id;
+    *backup_id_ptr = backup_args->id;
 
     rc = pthread_create(&heartbeat_tid, NULL, heartbeat_monitor_thread_main, backup_id_ptr);
     if (rc != 0) {
@@ -344,17 +328,19 @@ void run_as_backup(int id, const char *manager_ip, int manager_port) {
     }
     pthread_detach(heartbeat_tid);
 
-    printf("Backup server (ID %d) is performing its main duties...\n", id);
+    printf("Backup server (ID %d) is performing its main duties...\n", backup_args->id);
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
         int should_exit_role = global_shutdown_flag || (global_server_mode != BACKUP);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit_role) {
-            printf("[Backup %d] Exiting BACKUP role loop.\n", id);
+            printf("[Backup %d] Exiting BACKUP role loop.\n", backup_args->id);
             break;
         }
         sleep(1);
     }
-    printf("Backup server (ID %d) is cleaning up resources.\n", id);
+    printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
+
+    pthread_exit(NULL);
 }

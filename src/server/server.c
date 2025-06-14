@@ -239,19 +239,29 @@ int main(int argc, char* argv[]) {
 
 
 	pthread_t replication_thread;
-
 	if (server_mode == BACKUP_MANAGER)
 	{
-		manage_replicas(id, replica_socket_port);
+		ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
+		args->id = id;
+		args->port = replica_socket_port;
+
+		pthread_create(&replication_thread, NULL, manage_replicas, (void*) args);
+		pthread_detach(replication_thread);
 	}else if (server_mode == BACKUP)
 	{
-		run_as_backup(id, manager_ip, manager_port);
+		BackupArgs *args = (BackupArgs *)malloc(sizeof(BackupArgs)); 
+		args->id = id;
+		strncpy(args->hostname, manager_ip, sizeof(args->hostname) - 1);
+		args->hostname[sizeof(args->hostname) - 1] = '\0';
+		args->port = manager_port;
+
+		pthread_create(&replication_thread, NULL, run_as_backup, (void*) args);
+		pthread_detach(replication_thread);
 	}else
 	{
 		fprintf(stderr, "Unknown server mode.\n");
 		exit(1);
 	}
-
 
 	receive_serv_addr.sin_family = AF_INET;
     receive_serv_addr.sin_port = htons(receive_socket_port);
