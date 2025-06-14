@@ -256,9 +256,9 @@ char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
 
     return buffer;
 }
-void send_file(const int sockfd, char *file_path){
+void send_file(const int sockfd, char *filepath){
 
-    FILE *file_ptr = fopen(file_path, "rb");
+    FILE *file_ptr = fopen(filepath, "rb");
     if(file_ptr == NULL)
     {
         printf("Error opening file!");   
@@ -273,7 +273,7 @@ void send_file(const int sockfd, char *file_path){
     size_t total_bytes_read = 0;
     size_t bytes_read;
 
-    char *file_name = basename(file_path);
+    char *file_name = basename(filepath);
     Packet control_packet = create_control_packet(PACKET_SEND, strlen(file_name), file_name);
 
     if (!send_packet(sockfd, &control_packet)) {

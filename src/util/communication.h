@@ -17,7 +17,7 @@
 #define MAX_SESSIONS 2
 
 enum SendPacketErrors{
-    OK, SOCKET_CLOSED
+    SOCKET_CLOSED, OK, 
 };
 
 enum PacketTypes{
@@ -52,7 +52,7 @@ Packet create_control_packet(const int type, const uint16_t lenght, const char *
 Packet read_packet(int newsockfd);
 int send_packet(int sockfd, const Packet *packet);
 void write_payload_to_file(char *filename, int socket);
-void send_file(const int sockfd, char *file_name);
+void send_file(const int sockfd, char *filepath);
 char *read_file_from_socket(int socketfd, const char *path_to_save);
 size_t get_file_size(FILE *file_ptr);
 
