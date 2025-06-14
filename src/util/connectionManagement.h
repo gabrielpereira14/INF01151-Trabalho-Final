@@ -25,8 +25,6 @@ typedef struct SessionSockets{
     int send_socketfd;
 } SessionSockets;
 
-
-
 typedef struct Session {
     int session_index;
     int active;
@@ -38,8 +36,6 @@ typedef struct Session {
     FileSyncBuffer sync_buffer;
     struct UserContext *user_context;
 } Session;
-
-
 
 typedef struct UserContext {
     char *username;
@@ -57,5 +53,7 @@ UserContext *create_context(char *username);
 int is_session_empty(Session *s);
 uint32_t crc32(const char *filepath);
 void send_file_to_session(int send_to_index, UserContext *context, char *filepath);
+Session *get_user_session(UserContext *context, int session_index);
+Session *get_user_session_by_address(UserContext *context, const struct sockaddr_in *target_address);
 
 #endif

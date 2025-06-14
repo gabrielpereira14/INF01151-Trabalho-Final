@@ -229,7 +229,6 @@ void *start_console_input_thread(void *arg){
 
         get_command(command,path);
 
-        
         if (strcmp(command, "exit") == 0){
             close_client(socketfd);
             printf("Client closed\n");

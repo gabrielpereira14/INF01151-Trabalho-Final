@@ -1,6 +1,7 @@
 #include "./serverRoles.h"
 #include "./serverCommon.h"
 #include <bits/pthreadtypes.h>
+#include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -234,9 +235,15 @@ void *connect_to_server_thread(void *arg) {
                         case EVENT_CLIENT_DISCONNECTED:
 
                             break;
-                        case EVENT_FILE_UPLOADED:
-                            
+                        case EVENT_FILE_UPLOADED:{
+                            UserContext *context = get_or_create_context(&contextTable, event.username);
+                            Session *session = get_user_session_by_address(context, &event.device_address);
+                            char *user_folder_path = get_user_folder(event.username);
+                            handle_incoming_file(session, socketfd, user_folder_path);
+                            free(user_folder_path);
                             break;
+                        }
+                            
                         case EVENT_REPLICA_ADDED:
                             //add_replica(-1, -1);
                             break;

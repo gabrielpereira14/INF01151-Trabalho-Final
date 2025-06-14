@@ -1,8 +1,11 @@
 #include "./serverCommon.h"
 #include "./serverRoles.h"
+#include "replica.h"
 #include <stdio.h>
 
 const int ANSWER_OK = 1;
+
+enum FileStatus { FILE_STATUS_NOT_FOUND, FILE_STATUS_UPDATED, FILE_STATUS_EXISTS };
 
 HashTable contextTable;
 
@@ -73,15 +76,16 @@ void initialize_user_session_and_threads(struct sockaddr_in device_address, int 
 
 	if (server_mode == BACKUP_MANAGER)
 	{
+
+		ReplicaEvent event;
+		create_client_connected_event(&event , username, device_address);
+		notify_replicas(&event);
+		free_event(&event);
+
+
 		pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
 		pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
 		pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
-		
-		fprintf(stderr, "Notifying replicas\n");
-		ReplicaEvent event;
-		create_client_connected_event(&event , user_session, device_address);
-		notify_replicas(&event);
-		free_event(&event);
 	}
 
 
@@ -411,10 +415,9 @@ void *interface(void* arg) {
 			int total_packets = 1;
 			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
 
-			if(!send_packet(interface_socket,&packet)){
+			if(send_packet(interface_socket,&packet) != OK){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
-				free(files);
 			}
 
 			
@@ -528,40 +531,57 @@ void *send_f(void* arg) {
 	pthread_exit(NULL);
 }
 
-int should_process_file(FileNode *list, const char *filepath) {
+int get_file_status(FileNode *list, const char *filepath) {
 	if (!list){
-		//fprintf(stderr, "No files saved\n");
-		return 1;
+		return FILE_STATUS_NOT_FOUND;
 	}
 
 	FileNode *file_node = FileLinkedList_get(list, filepath);
 
 	if (!file_node){
-		//fprintf(stderr, "File not found\n");
-		return 1;
+		return FILE_STATUS_NOT_FOUND;
 	}
 
 	uint32_t old_crc = file_node->crc;
     uint32_t new_crc = crc32(filepath);
-    return (new_crc != old_crc);
+
+	if (new_crc != old_crc)
+	{
+		return FILE_STATUS_UPDATED;
+	}
+
+    return FILE_STATUS_EXISTS;
 }
 
 void handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
 	char *filepath = read_file_from_socket(receive_socket, folder_path);
-	
-	if(session->active && should_process_file(session->user_context->file_list, filepath)){
-		FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
-		if(!file_node){
-			if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
-				fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+	fprintf(stderr, "File received.\n");
+	if(session->active ){
+		switch (get_file_status(session->user_context->file_list, filepath)) {
+			case FILE_STATUS_NOT_FOUND:
+				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
+					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+				}
+				break;
+			case FILE_STATUS_UPDATED:{
+				FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
+				file_node->crc = crc32(filepath);
 			}
-		}else{
-			file_node->crc = crc32(filepath);
+		}	
+		if (server_mode == BACKUP_MANAGER)
+		{
+			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
+			send_file_to_session(send_to_index, session->user_context, filepath);
 		}
+	}
+
+	if(server_mode == BACKUP_MANAGER){
+		ReplicaEvent event;
+		create_file_upload_event(&event, session->user_context->username, session->device_address, filepath);
+		notify_replicas(&event);
+		free_event(&event);
 		
-		int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
-		send_file_to_session(send_to_index, session->user_context, filepath);
 	}
 
 	free(filepath);
