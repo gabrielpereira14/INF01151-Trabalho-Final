@@ -114,8 +114,7 @@ int get_command(char* command, char* arg)
 }
 
 void list_server(int socketfd){
-    char *dummy = "";
-    Packet control_packet = create_control_packet(PACKET_LIST, 1, dummy);
+    Packet control_packet = create_control_packet(PACKET_LIST, 1, NULL);
 
     if (!send_packet(socketfd, &control_packet)) {
         fprintf(stderr, "ERROR sending control packet (list_server)\n");
@@ -205,12 +204,11 @@ void delete(const char *filename, int socketfd) {
 
     printf("Exclusão solicitada.\n");
 }
-
+F
 void close_client(int socketfd){
     signal_shutdown = 1;
 
-    char *dummy = "";
-    Packet control_packet = create_control_packet(PACKET_EXIT, 1, dummy);
+    Packet control_packet = create_control_packet(PACKET_EXIT, 1, NULL);
 
     if (!send_packet(socketfd, &control_packet)) {
         fprintf(stderr, "ERROR sending control packet (close client)\n");
