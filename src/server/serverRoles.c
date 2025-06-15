@@ -1,5 +1,6 @@
 #include "./serverRoles.h"
 #include "./serverCommon.h"
+#include "replica.h"
 #include <bits/pthreadtypes.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -107,14 +108,26 @@ void *replica_listener_thread(void *arg) {
                 break;
             }
 
+            Packet packet = read_packet(newsockfd);
+            int replica_id = atoi(packet._payload);
+
             char ip_str[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(cli_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
-            fprintf(stderr, "[Manager Listener Thread] Accepted new replica connection from %s:%hu (fd %d)\n",
-                   ip_str, ntohs(cli_addr.sin_port), newsockfd);
+            fprintf(stderr, "[Manager Listener Thread] Accepted new replica connection from %s:%hu (fd %d) - Id %d\n",
+                   ip_str, ntohs(cli_addr.sin_port), newsockfd, replica_id);
 
-            if(!add_replica(newsockfd, 0)){
+
+
+            if(!add_replica(newsockfd, replica_id, cli_addr)){
                 fprintf(stderr, "[Manager Listener Thread] Error adding replica");
+                continue;
             }
+
+            ReplicaEvent event;
+            create_replica_added_event(&event , replica_id, cli_addr);
+            notify_replicas(&event);
+            free_event(&event);
+
         } else if (replica_connected < 0) {
             if (errno == EINTR) {
                 continue;
@@ -211,6 +224,11 @@ void *connect_to_server_thread(void *arg) {
 
         printf("[Backup %d Connection Thread] Successfully connected to %s:%d (socket fd: %d).\n", id, hostname, port, socketfd);
 
+        char *id_string = malloc(2);
+        sprintf(id_string, "%d", id);
+        Packet packet = create_control_packet(PACKET_REPLICA_MSG, strlen(id_string), id_string);
+        send_packet(socketfd, &packet);
+
         while (1) {
             pthread_mutex_lock(&mode_change_mutex);
             int comm_should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || connection_closed;
@@ -232,8 +250,8 @@ void *connect_to_server_thread(void *arg) {
                             break;
                         case EVENT_CLIENT_DISCONNECTED:{
                             UserContext *context = get_or_create_context(&contextTable, event.username);
-                            Session *session = get_user_session_by_address(context, &event.device_address);
                             pthread_mutex_lock(&context->lock);
+                            Session *session = get_user_session_by_address(context, &event.device_address);
                             session->user_context->sessions[session->session_index] = NULL;
                             pthread_mutex_unlock(&context->lock);
                             fprintf(stderr, "Usuário %s desconectou.\n", event.username);
@@ -251,10 +269,14 @@ void *connect_to_server_thread(void *arg) {
                             break;
                         }
                             
-                        case EVENT_REPLICA_ADDED:
-                            //add_replica(-1, -1);
+                        case EVENT_REPLICA_ADDED:{
+                            int replica_id = event.username[0];
+                            if (replica_id != id)
+                                add_replica(-1, replica_id, event.device_address);
                             break;
+                        }
                         case EVENT_HEARTBEAT:
+                            // CONTROLAR PRA CHAMAR A ELEICAO
                             //fprintf(stderr, "[Backup %d Connection Thread] Heartbeat received.\n",id);
                             break;
                         }

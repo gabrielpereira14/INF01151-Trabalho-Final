@@ -1,27 +1,31 @@
 #include "./replica.h"
 #include <stdio.h>
+#include <netinet/in.h>
+#include <stdio.h>
 
 int current_manager = -1;
 
 typedef struct ReplicaNode {
     int id;
     int socketfd;
+    struct sockaddr_in device_address;
     struct ReplicaNode *next;
 } ReplicaNode;
 
 static ReplicaNode *head = NULL;
 static pthread_mutex_t replica_list_mutex;
 
-static ReplicaNode *create_new_node(int socketfd, int id) {
-    ReplicaNode *newNode = (ReplicaNode *)malloc(sizeof(ReplicaNode));
-    if (newNode == NULL) {
+static ReplicaNode *create_new_node(int socketfd, int id, struct sockaddr_in device_address) {
+    ReplicaNode *new_node = (ReplicaNode *)malloc(sizeof(ReplicaNode));
+    if (new_node == NULL) {
         perror("Failed to allocate memory for new ReplicaNode");
         return NULL;
     }
-    newNode->id = id;
-    newNode->socketfd = socketfd;
-    newNode->next = NULL;
-    return newNode;
+    new_node->id = id;
+    new_node->socketfd = socketfd;
+    new_node->device_address = device_address;
+    new_node->next = NULL;
+    return new_node;
 }
 
 static ReplicaNode *find_node(int socketfd) {
@@ -44,7 +48,7 @@ void destroy_replica_list_mutex() {
     pthread_mutex_destroy(&replica_list_mutex);
 }
 
-int add_replica(int socketfd, int id) {
+int add_replica(int socketfd, int id, struct sockaddr_in device_address) {
     pthread_mutex_lock(&replica_list_mutex);
     if (find_node(socketfd) != NULL) {
         fprintf(stderr, "Warning: Replica with socketfd %d already exists in the list.\n", socketfd);
@@ -52,14 +56,15 @@ int add_replica(int socketfd, int id) {
         return 0;
     }
 
-    ReplicaNode *newNode = create_new_node(socketfd, id);
+    ReplicaNode *newNode = create_new_node(socketfd, id, device_address);
     if (newNode == NULL) {
         pthread_mutex_unlock(&replica_list_mutex); 
         return 0;
     }
     newNode->next = head;
     head = newNode;
-    pthread_mutex_unlock(&replica_list_mutex); 
+    pthread_mutex_unlock(&replica_list_mutex);
+    fprintf(stderr, "Replica %d successfully added to list\n", id);
     return 1;
 }
 
@@ -196,6 +201,20 @@ ReplicaEvent *create_client_disconnected_event(ReplicaEvent *event, char *userna
 
     return event;
 }
+
+ReplicaEvent *create_replica_added_event(ReplicaEvent *event, int id, struct sockaddr_in device_address){
+    event->type = EVENT_REPLICA_ADDED;
+
+    event->username = malloc(sizeof(int) + 1);
+    event->username[0] = id;
+    event->username[1] = '\0';
+
+    event->device_address = device_address;
+    event->filepath = NULL;
+
+    return event;
+}
+
 
 
 ReplicaEvent *create_file_upload_event(ReplicaEvent *event, char *username, struct sockaddr_in device_address, char *filepath){
