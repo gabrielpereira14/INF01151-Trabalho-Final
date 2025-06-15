@@ -204,7 +204,6 @@ void delete(const char *filename, int socketfd) {
 
     printf("Exclusão solicitada.\n");
 }
-F
 void close_client(int socketfd){
     signal_shutdown = 1;
 
