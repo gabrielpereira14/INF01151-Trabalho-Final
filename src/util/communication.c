@@ -78,13 +78,14 @@ Packet deserialize_packet(unsigned char *serialized_packet, size_t packet_size){
             packet._payload = NULL;
             return packet;
         }
-        char *buffer = malloc(packet.length);
+        char *buffer = malloc(packet.length + 1);  
         if (!buffer) {
             packet._payload = NULL;
             return packet;
         }
         memcpy(buffer, serialized_packet + offset, packet.length);
-        packet._payload = buffer; 
+        buffer[packet.length] = '\0';  
+        packet._payload = buffer;
     } else {
         packet._payload = NULL;
     }
