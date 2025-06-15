@@ -9,7 +9,6 @@ enum FileStatus { FILE_STATUS_NOT_FOUND, FILE_STATUS_UPDATED, FILE_STATUS_EXISTS
 
 HashTable contextTable;
 
-int server_mode = -1;
 char manager_ip[256] = "";
 int manager_port = -1;
 int id = -1;
@@ -72,9 +71,7 @@ void initialize_user_session_and_threads(struct sockaddr_in device_address, int 
 	SessionSockets session_sockets = { sock_interface, sock_receive, sock_send };
 	Session *user_session = create_session(free_session_index, context, session_sockets, device_address);
 
-	
-
-	if (server_mode == BACKUP_MANAGER)
+	if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
 	{
 
 		ReplicaEvent event;
@@ -141,9 +138,9 @@ void parse_server_arguments(int argc, char *argv[]) {
     }
 
     if (strcmp(argv[2], "-M") == 0) {
-        server_mode = BACKUP_MANAGER;
+        global_server_mode = BACKUP_MANAGER;
     } else if (strcmp(argv[2], "-B") == 0) {
-        server_mode = BACKUP;
+        global_server_mode = BACKUP;
 
         if (argc < 5) { 
             fprintf(stderr, "Necessário especificar ip e porta quando MODO = B\n");
@@ -224,7 +221,7 @@ int main(int argc, char* argv[]) {
 
 
 	pthread_t replication_thread;
-	if (server_mode == BACKUP_MANAGER)
+	if (global_server_mode == BACKUP_MANAGER)
 	{
 		ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
 		args->id = id;
@@ -232,7 +229,7 @@ int main(int argc, char* argv[]) {
 
 		pthread_create(&replication_thread, NULL, manage_replicas, (void*) args);
 		pthread_detach(replication_thread);
-	}else if (server_mode == BACKUP)
+	}else if (global_server_mode == BACKUP)
 	{
 		BackupArgs *args = (BackupArgs *)malloc(sizeof(BackupArgs)); 
 		args->id = id;
@@ -577,14 +574,15 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 				file_node->crc = crc32(filepath);
 			}
 		}	
-		if (server_mode == BACKUP_MANAGER)
+
+		if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
 		{
 			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
 			send_file_to_session(send_to_index, session->user_context, filepath);
 		}
 	}
 
-	if(server_mode == BACKUP_MANAGER && filepath != NULL){
+	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filepath != NULL){
 		ReplicaEvent event;
 		create_file_upload_event(&event, session->user_context->username, session->device_address, filepath);
 		notify_replicas(&event);

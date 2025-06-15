@@ -13,6 +13,7 @@
 #include <arpa/inet.h> 
 #include <sys/socket.h>  
 #include <netinet/in.h>
+#include <stdatomic.h>
 
 
 #include "../util/communication.h"
@@ -32,8 +33,8 @@ typedef struct {
     int port;
 } ManagerArgs;
 
-extern volatile enum ServerMode global_server_mode;
-extern volatile int global_shutdown_flag;
+extern atomic_int global_server_mode;
+extern atomic_int global_shutdown_flag;
 extern pthread_mutex_t mode_change_mutex; 
 
 void *replica_listener_thread(void *arg);

@@ -5,8 +5,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
-volatile enum ServerMode global_server_mode = UNKNOWN_MODE;
-volatile int global_shutdown_flag = 0;
+atomic_int global_server_mode = UNKNOWN_MODE;
+atomic_int global_shutdown_flag = 0;
 pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
@@ -86,7 +86,7 @@ void *replica_listener_thread(void *arg) {
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP_MANAGER);
+        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP_MANAGER);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -136,7 +136,7 @@ void *heartbeat_monitor_thread_main(void *arg) {
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP);
+        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -146,10 +146,10 @@ void *heartbeat_monitor_thread_main(void *arg) {
 
         if (manager_heartbeats_stopped()) {
             pthread_mutex_lock(&mode_change_mutex);
-            if (global_server_mode == BACKUP) { 
+            if (atomic_load(&global_server_mode) == BACKUP) { 
                 printf("[Backup %d] Manager heartbeats stopped. Initiating failover.\n", id);
                 if (run_election(id)) { 
-                    global_server_mode = BACKUP_MANAGER; // Change role
+                    atomic_store(&global_server_mode,BACKUP_MANAGER);
                     printf("[Backup %d] Role changed to MANAGER.\n", id);
                 } else {
                     printf("[Backup %d] Failed to win election. Remaining BACKUP.\n", id);
@@ -176,7 +176,7 @@ void *connect_to_server_thread(void *arg) {
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = global_shutdown_flag || (global_server_mode != BACKUP) || connection_closed;
+        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || connection_closed;
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -213,7 +213,7 @@ void *connect_to_server_thread(void *arg) {
 
         while (1) {
             pthread_mutex_lock(&mode_change_mutex);
-            int comm_should_exit = global_shutdown_flag || (global_server_mode != BACKUP) || connection_closed;
+            int comm_should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || connection_closed;
             pthread_mutex_unlock(&mode_change_mutex);
 
             if (comm_should_exit) {
@@ -227,7 +227,6 @@ void *connect_to_server_thread(void *arg) {
                     case PACKET_REPLICA_MSG:{
                         ReplicaEvent event = deserialize_replica_event(packet._payload);
                         switch (event.type) {
-
                         case EVENT_CLIENT_CONNECTED:
                             initialize_user_session_and_threads(event.device_address, -1, -1, -1, event.username);
                             break;
@@ -264,6 +263,8 @@ void *connect_to_server_thread(void *arg) {
                     case PACKET_CONNECTION_CLOSED:{
                         fprintf(stderr, "[Backup %d Connection Thread] Connection closed.\n",id);
                         connection_closed = 1;
+                        fprintf(stderr, "TESTANDO A TROCA DE FUNCAO!!!!!!!!!!!");
+                        atomic_store(&global_server_mode, BACKUP_MANAGER);
                         break;
                     }
                         
@@ -290,7 +291,7 @@ void *connect_to_server_thread(void *arg) {
 void *manage_replicas(void *args) {
     ManagerArgs *manager_args = (ManagerArgs *) args;
     printf("Server ID %d: Running as MANAGER.\n", manager_args->id);
-    global_server_mode = BACKUP_MANAGER;
+    atomic_store(&global_server_mode,BACKUP_MANAGER);
     pthread_t listener_tid;
 
     int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, manager_args);
@@ -304,7 +305,7 @@ void *manage_replicas(void *args) {
     printf("Manager server (ID %d) is performing its main duties...\n", manager_args->id);
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit_role = global_shutdown_flag || (global_server_mode != BACKUP_MANAGER);
+        int should_exit_role = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP_MANAGER);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit_role) {
@@ -323,7 +324,7 @@ void *run_as_backup(void* arg) {
 
     printf("Server ID %d: Running as BACKUP.\n", backup_args->id);
     printf("Manager to connect to: %s:%d\n", backup_args->hostname, backup_args->port);
-    global_server_mode = BACKUP;
+    atomic_store(&global_server_mode,BACKUP);
 
     pthread_t manager_conn_tid;
 
@@ -354,7 +355,7 @@ void *run_as_backup(void* arg) {
     printf("Backup server (ID %d) is performing its main duties...\n", backup_args->id);
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit_role = global_shutdown_flag || (global_server_mode != BACKUP);
+        int should_exit_role = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit_role) {
@@ -364,6 +365,17 @@ void *run_as_backup(void* arg) {
         sleep(1);
     }
     printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
+
+    if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
+    {
+        ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
+		args->id = backup_args->id;
+		args->port = backup_args->port + 1;
+        pthread_t manager_thread;
+        pthread_create(&manager_thread, NULL, manage_replicas, (void *) args);
+        pthread_detach(manager_thread);
+        fprintf(stderr,  "TROCOU\n");
+    }
 
     pthread_exit(NULL);
 }
