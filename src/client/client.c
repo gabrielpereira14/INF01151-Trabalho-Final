@@ -23,6 +23,8 @@
 #define MAX_COMMAND 13
 #define MAX_ARGUMENT 115
 
+int signal_shutdown = 0;
+
 char sync_dir_path[PATH_MAX];
 
 int create_sync_dir(){
@@ -205,11 +207,13 @@ void delete(const char *filename, int socketfd) {
 }
 
 void close_client(int socketfd){
+    signal_shutdown = 1;
+
     char *dummy = "";
     Packet control_packet = create_control_packet(PACKET_EXIT, 1, dummy);
 
     if (!send_packet(socketfd, &control_packet)) {
-        fprintf(stderr, "ERROR sending control packet (list_server)\n");
+        fprintf(stderr, "ERROR sending control packet (close client)\n");
         return;
     }
 }
@@ -266,7 +270,7 @@ void *start_console_input_thread(void *arg){
 void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
-    while (1)
+    while (signal_shutdown)
 	{
 		char *filepath = read_file_from_socket(socket, sync_dir_path);
         fprintf(stderr,"File received!\n");
@@ -298,7 +302,7 @@ void *start_directory_watcher_thread(void* arg) {
     }while(wd < 0);
   
 
-    while (1) {
+    while (!signal_shutdown) {
         ssize_t length = read(fd, buffer, EVENT_BUF_LEN);
 
         if (length < 0) {
@@ -462,7 +466,8 @@ int main(int argc, char* argv[]){
     pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
 
     pthread_join(console_thread, NULL);
-    
+    pthread_join(file_watcher_thread, NULL);
+    pthread_join(receive_files_thread, NULL);
 
 	close(sock_interface);
     return EXIT_SUCCESS;
