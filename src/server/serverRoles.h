@@ -38,6 +38,5 @@ extern atomic_int global_shutdown_flag;
 extern pthread_mutex_t mode_change_mutex; 
 
 void *replica_listener_thread(void *arg);
-void *heartbeat_monitor_thread_main(void *arg);
 
 #endif 

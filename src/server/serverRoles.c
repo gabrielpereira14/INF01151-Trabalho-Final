@@ -2,14 +2,21 @@
 #include "./serverCommon.h"
 #include "replica.h"
 #include <bits/pthreadtypes.h>
+#include <time.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
 
+
+#define HEARTBEAT_TIMEOUT_SECONDS 5
+
 atomic_int global_server_mode = UNKNOWN_MODE;
 atomic_int global_shutdown_flag = 0;
-pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
+time_t last_heartbeat;
 
+pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t heartbeat_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void send_heartbeat_to_replicas() {
     ReplicaEvent event;
@@ -19,12 +26,25 @@ void send_heartbeat_to_replicas() {
     //fprintf(stderr, "Heartbeat to %d replicas!\n", notified_replicas);
 }
 
-int manager_heartbeats_stopped() {
-    return 0;
+void heartbeat_received(){
+    pthread_mutex_lock(&heartbeat_mutex);
+    last_heartbeat = time(NULL);
+    pthread_mutex_unlock(&heartbeat_mutex);
+}
+
+int is_manager_running() {
+    pthread_mutex_lock(&heartbeat_mutex);
+    int time_diff = difftime(time(NULL), last_heartbeat);
+    pthread_mutex_unlock(&heartbeat_mutex);
+
+    if (time_diff > HEARTBEAT_TIMEOUT_SECONDS) 
+        return 0;
+    return 1;
 }
 
 int run_election(int id) {
-    return 0;
+    fprintf(stderr, "Running election.\n");
+    return 1;
 }
 
 
@@ -157,7 +177,9 @@ void *heartbeat_monitor_thread_main(void *arg) {
             break;
         }
 
-        if (manager_heartbeats_stopped()) {
+        if (!is_manager_running()) {
+            fprintf(stderr, "[Backup %d Connection Thread] No heartbeat received in the last %d seconds. Connection might be dead.\n", 
+                id, HEARTBEAT_TIMEOUT_SECONDS);
             pthread_mutex_lock(&mode_change_mutex);
             if (atomic_load(&global_server_mode) == BACKUP) { 
                 printf("[Backup %d] Manager heartbeats stopped. Initiating failover.\n", id);
@@ -183,13 +205,14 @@ void *connect_to_server_thread(void *arg) {
     const char *hostname = backup_args->hostname;
     int port = backup_args->port;
 
+    
+
     int socketfd = -1;
     printf("[Backup %d Connection Thread] Attempting to connect to %s:%d.\n", id, hostname, port);
-    int connection_closed = 0;
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || connection_closed;
+        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -231,7 +254,7 @@ void *connect_to_server_thread(void *arg) {
 
         while (1) {
             pthread_mutex_lock(&mode_change_mutex);
-            int comm_should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || connection_closed;
+            int comm_should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
             pthread_mutex_unlock(&mode_change_mutex);
 
             if (comm_should_exit) {
@@ -276,17 +299,13 @@ void *connect_to_server_thread(void *arg) {
                             break;
                         }
                         case EVENT_HEARTBEAT:
-                            // CONTROLAR PRA CHAMAR A ELEICAO
-                            //fprintf(stderr, "[Backup %d Connection Thread] Heartbeat received.\n",id);
+                            heartbeat_received();
                             break;
                         }
                         break;
                     }
                     case PACKET_CONNECTION_CLOSED:{
                         fprintf(stderr, "[Backup %d Connection Thread] Connection closed.\n",id);
-                        connection_closed = 1;
-                        fprintf(stderr, "TESTANDO A TROCA DE FUNCAO!!!!!!!!!!!");
-                        atomic_store(&global_server_mode, BACKUP_MANAGER);
                         break;
                     }
                         
@@ -305,15 +324,15 @@ void *connect_to_server_thread(void *arg) {
     close(socketfd);
 
     printf("[Backup %d Connection Thread] Thread fully exiting.\n", id);
-    free(backup_args);
     pthread_exit(NULL);
 }
-
 
 void *manage_replicas(void *args) {
     ManagerArgs *manager_args = (ManagerArgs *) args;
     printf("Server ID %d: Running as MANAGER.\n", manager_args->id);
     atomic_store(&global_server_mode,BACKUP_MANAGER);
+    last_heartbeat = time(NULL);
+    
     pthread_t listener_tid;
 
     int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, manager_args);
@@ -347,6 +366,8 @@ void *run_as_backup(void* arg) {
     printf("Server ID %d: Running as BACKUP.\n", backup_args->id);
     printf("Manager to connect to: %s:%d\n", backup_args->hostname, backup_args->port);
     atomic_store(&global_server_mode,BACKUP);
+
+    last_heartbeat = time(NULL);
 
     pthread_t manager_conn_tid;
 
@@ -387,6 +408,7 @@ void *run_as_backup(void* arg) {
         sleep(1);
     }
     printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
+    
 
     if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
     {
@@ -396,8 +418,8 @@ void *run_as_backup(void* arg) {
         pthread_t manager_thread;
         pthread_create(&manager_thread, NULL, manage_replicas, (void *) args);
         pthread_detach(manager_thread);
-        fprintf(stderr,  "TROCOU\n");
     }
 
+    free(backup_args);
     pthread_exit(NULL);
 }
