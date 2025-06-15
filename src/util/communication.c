@@ -1,5 +1,6 @@
 
 #include "communication.h"
+#include <stdio.h>
 
 unsigned char* serialize_packet(const Packet* pkt, size_t* out_size) {
     if (!pkt || (pkt->length > 0 && !pkt->_payload)) {
@@ -306,6 +307,9 @@ char *read_file_from_socket(int socketfd, const char *path_to_save){
     char *filename = malloc(packet.length + 1);
     memcpy(filename, packet._payload, packet.length);
     filename[packet.length] = '\0';
+    if (packet.length == 0){
+        return NULL;
+    }
     char *filepath = malloc(strlen(path_to_save) + 1 + strlen(filename) + 1);
     sprintf(filepath, "%s/%s", path_to_save, filename); 
     write_payload_to_file(filepath,socketfd);

@@ -130,8 +130,6 @@ Session *get_user_session_by_address(UserContext *context, const struct sockaddr
         return NULL;
     }
 
-    pthread_mutex_lock(&context->lock);
-
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (context->sessions[i] != NULL) {
             Session *current_session = context->sessions[i];
@@ -146,8 +144,6 @@ Session *get_user_session_by_address(UserContext *context, const struct sockaddr
             }
         }
     }
-
-    pthread_mutex_unlock(&context->lock);
 
     return found_session;
 }

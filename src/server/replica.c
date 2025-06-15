@@ -1,4 +1,5 @@
 #include "./replica.h"
+#include <stdio.h>
 
 int current_manager = -1;
 
@@ -132,7 +133,6 @@ int send_event(ReplicaEvent* event, int socketfd){
 
 int notify_replicas(ReplicaEvent* event){
     int notified_replicas = 0;
-
     pthread_mutex_lock(&replica_list_mutex);
     ReplicaNode *current = head;
     ReplicaNode *prev = NULL;
@@ -155,6 +155,10 @@ int notify_replicas(ReplicaEvent* event){
         
     }
     pthread_mutex_unlock(&replica_list_mutex); 
+
+    if (event->type != EVENT_HEARTBEAT){
+        fprintf(stderr, "%d replicas notified\n", notified_replicas);
+    }
     
     return notified_replicas;
 }
@@ -183,6 +187,16 @@ ReplicaEvent *create_client_connected_event(ReplicaEvent *event, char *username,
 
     return event;
 }
+
+ReplicaEvent *create_client_disconnected_event(ReplicaEvent *event, char *username, struct sockaddr_in device_address){
+    event->type = EVENT_CLIENT_DISCONNECTED;
+    event->username = strdup(username);
+    event->device_address = device_address;
+    event->filepath = NULL;
+
+    return event;
+}
+
 
 ReplicaEvent *create_file_upload_event(ReplicaEvent *event, char *username, struct sockaddr_in device_address, char *filepath){
     event->type = EVENT_FILE_UPLOADED;

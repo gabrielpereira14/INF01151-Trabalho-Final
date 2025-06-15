@@ -13,7 +13,7 @@ pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
 void send_heartbeat_to_replicas() {
     ReplicaEvent event;
     create_heartbeat_event(&event);
-    int notified_replicas = notify_replicas(&event);
+    notify_replicas(&event);
     free_event(&event);
     //fprintf(stderr, "Heartbeat to %d replicas!\n", notified_replicas);
 }
@@ -230,14 +230,22 @@ void *connect_to_server_thread(void *arg) {
 
                         case EVENT_CLIENT_CONNECTED:
                             initialize_user_session_and_threads(event.device_address, -1, -1, -1, event.username);
-                            //exit(1);
                             break;
-                        case EVENT_CLIENT_DISCONNECTED:
-
+                        case EVENT_CLIENT_DISCONNECTED:{
+                            UserContext *context = get_or_create_context(&contextTable, event.username);
+                            Session *session = get_user_session_by_address(context, &event.device_address);
+                            pthread_mutex_lock(&context->lock);
+                            session->user_context->sessions[session->session_index] = NULL;
+                            pthread_mutex_unlock(&context->lock);
+                            fprintf(stderr, "Usuário %s desconectou.\n", event.username);
+                        }
+                           
                             break;
                         case EVENT_FILE_UPLOADED:{
                             UserContext *context = get_or_create_context(&contextTable, event.username);
+                            pthread_mutex_lock(&context->lock);
                             Session *session = get_user_session_by_address(context, &event.device_address);
+                            pthread_mutex_unlock(&context->lock);
                             char *user_folder_path = get_user_folder(event.username);
                             handle_incoming_file(session, socketfd, user_folder_path);
                             free(user_folder_path);

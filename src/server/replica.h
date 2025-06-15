@@ -32,6 +32,7 @@ int add_replica(int socketfd, int id);
 void connect_to_manager(struct sockaddr_in server_address);
 
 ReplicaEvent *create_client_connected_event(ReplicaEvent *event, char *username, struct sockaddr_in device_address);
+ReplicaEvent *create_client_disconnected_event(ReplicaEvent *event, char *username, struct sockaddr_in device_address);
 ReplicaEvent *create_heartbeat_event(ReplicaEvent *event);
 ReplicaEvent *create_file_upload_event(ReplicaEvent *event, char *username, struct sockaddr_in device_address, char *filepath);
 

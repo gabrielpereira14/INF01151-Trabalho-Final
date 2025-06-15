@@ -498,8 +498,15 @@ void *interface(void* arg) {
 
 			pthread_mutex_lock(&session->user_context->lock);
 			session->user_context->sessions[session->session_index] = NULL;
+
+			ReplicaEvent event;
+			create_client_disconnected_event(&event, session->user_context->username, session->device_address);
+
     		pthread_mutex_unlock(&session->user_context->lock);
-			
+
+			notify_replicas(&event);
+			free_event(&event);
+			break;
 		}
 		
 		default:
@@ -556,8 +563,9 @@ int get_file_status(FileNode *list, const char *filepath) {
 void handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
 	char *filepath = read_file_from_socket(receive_socket, folder_path);
-	fprintf(stderr, "File received.\n");
+	
 	if(session->active ){
+		fprintf(stderr, "File received.\n");
 		switch (get_file_status(session->user_context->file_list, filepath)) {
 			case FILE_STATUS_NOT_FOUND:
 				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
@@ -576,7 +584,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 		}
 	}
 
-	if(server_mode == BACKUP_MANAGER){
+	if(server_mode == BACKUP_MANAGER && filepath != NULL){
 		ReplicaEvent event;
 		create_file_upload_event(&event, session->user_context->username, session->device_address, filepath);
 		notify_replicas(&event);
