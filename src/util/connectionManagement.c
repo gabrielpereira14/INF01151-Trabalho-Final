@@ -1,5 +1,6 @@
 #include "./connectionManagement.h"
 #include "./contextHashTable.h"
+#include <netinet/in.h>
 
 uint32_t crc32(const char *filepath) {
     uint8_t buffer[1024];
@@ -59,18 +60,18 @@ int add_file_to_context(HashTable *table, const char *filename, char *username){
 }
 
 
-Session *create_session(int index, UserContext *context, SessionSockets sockets){
+Session *create_session(int index, UserContext *context, SessionSockets sockets, struct sockaddr_in device_address){
     Session *session = malloc(sizeof(Session));
     
     session->session_index = index;
-     session->active = 1;
+    session->active = 1;
 
+    session->device_address = device_address;
     session->user_context = context;
     session->sockets = sockets;
 
     init_file_sync_buffer(&session->sync_buffer);
    
-
     return session;
 }
 
@@ -99,3 +100,50 @@ void send_file_to_session(int send_to_index, UserContext *context, char *filepat
 }
 
 
+Session *get_user_session(UserContext *context, int session_index) {
+    Session *session_to_return = NULL;
+
+    if (context == NULL) {
+        fprintf(stderr, "Error: UserContext is NULL when trying to get session.\n");
+        return NULL;
+    }
+
+    if (session_index < 0 || session_index >= MAX_SESSIONS) {
+        fprintf(stderr, "Error: Session index %d is out of bounds (0 to %d).\n", session_index, MAX_SESSIONS - 1);
+        return NULL;
+    }
+
+    pthread_mutex_lock(&context->lock);
+    if (context->sessions[session_index] != NULL) {
+        session_to_return = context->sessions[session_index];
+    }
+    pthread_mutex_unlock(&context->lock);
+
+    return session_to_return;
+}
+
+Session *get_user_session_by_address(UserContext *context, const struct sockaddr_in *target_address) {
+    Session *found_session = NULL;
+
+    if (context == NULL || target_address == NULL) {
+        fprintf(stderr, "Error: UserContext or target_address is NULL.\n");
+        return NULL;
+    }
+
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (context->sessions[i] != NULL) {
+            Session *current_session = context->sessions[i];
+
+            if (current_session->device_address.sin_addr.s_addr == target_address->sin_addr.s_addr &&
+                current_session->device_address.sin_port == target_address->sin_port)
+            {
+
+                found_session = current_session;
+                break; 
+                
+            }
+        }
+    }
+
+    return found_session;
+}

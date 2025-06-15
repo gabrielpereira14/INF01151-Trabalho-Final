@@ -1,37 +1,23 @@
-#include <stdlib.h>
+#include "./serverCommon.h"
+#include "./serverRoles.h"
+#include "replica.h"
 #include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <signal.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <dirent.h>
-#include <time.h>
-#include <limits.h>
 
-
-#include "../util/communication.h"
-#include "../util/connectionManagement.h"
-#include "../util/contextHashTable.h"
-#include "../util/fileSync.h"
-
-#define MAX_USERNAME_LENGTH 32
-
-#define USER_FILES_FOLDER "user files"
 const int ANSWER_OK = 1;
 
+enum FileStatus { FILE_STATUS_NOT_FOUND, FILE_STATUS_UPDATED, FILE_STATUS_EXISTS };
 
 HashTable contextTable;
 
+char manager_ip[256] = "";
+int manager_port = -1;
+int id = -1;
 
 void perror_exit(const char *msg); // Escreve a mensagem de erro e termina o programa com falha
 void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
 void *receive(void* arg); // Recebe os arquivos do cliente
+void *replication_management(void *args);
 void termination(int sig);
 
 // Variáveis definidas globalmente para poderem ser fechadas na função de terminação
@@ -69,7 +55,7 @@ void read_username(char *username, int sock_interface){
 	fflush(stdout);
 }
 
-void initialize_user_session_and_threads(int sock_interface, int sock_receive, int sock_send, char *username) {
+void initialize_user_session_and_threads(struct sockaddr_in device_address, int sock_interface, int sock_receive, int sock_send, char *username) {
 	UserContext *context = get_or_create_context(&contextTable, strdup(username));
 
 	pthread_mutex_lock(&context->lock);
@@ -83,21 +69,28 @@ void initialize_user_session_and_threads(int sock_interface, int sock_receive, i
 	printf("Usuario %s conectado, sessão %d\n", username,free_session_index);
 
 	SessionSockets session_sockets = { sock_interface, sock_receive, sock_send };
-	Session *user_session = create_session(free_session_index, context, session_sockets);
+	Session *user_session = create_session(free_session_index, context, session_sockets, device_address);
 
-	pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
-    pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
-    pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
+	if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
+	{
+
+		ReplicaEvent event;
+		create_client_connected_event(&event , username, device_address);
+		notify_replicas(&event);
+		free_event(&event);
+
+
+		pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
+		pthread_create(&user_session->threads.send_thread, NULL, send_f, user_session);
+		pthread_create(&user_session->threads.receive_thread, NULL, receive, user_session);
+	}
+
 
 	context->sessions[free_session_index] = user_session; 
 	pthread_mutex_unlock(&context->lock);
-	/*
-	fprintf(stderr,
-	"Usuario conectado threads:\n\tinterface - %lu\n\tsend - %lu\n\treceive - %lu\n",
-	(unsigned long) user_session->threads.interface_thread,
-	(unsigned long) user_session->threads.send_thread,
-	(unsigned long) user_session->threads.receive_thread);
-	*/
+
+	
+	HashTable_print(&contextTable);
 }
 
 
@@ -126,16 +119,66 @@ void handle_new_connection(int sock_interface){
 		    perror_exit("ERRO aceitando a coneccao de send: ");
 		
 
-		initialize_user_session_and_threads(sock_interface,sock_receive,sock_send,username);
+		initialize_user_session_and_threads(cli_send_addr, sock_interface, sock_receive, sock_send, username);
 }
 
-int main() {
+void parse_server_arguments(int argc, char *argv[]) {
+    if (argc < 3) { 
+        fprintf(stderr, "Uso: ./server ID -MODO [ip porta]\n");
+		fprintf(stderr, "ID = numero natural\n");
+        fprintf(stderr, "MODO = M ou B (manager ou backup, respectivamente)\n");
+        fprintf(stderr, "ip e porta desnecessario se MODO = M\n");
+        exit(1);
+    }
+
+    id = atoi(argv[1]);
+    if (id <= 0) { 
+        fprintf(stderr, "ID do servidor inválido: %s (deve ser um número inteiro positivo)\n", argv[1]);
+        exit(1);
+    }
+
+    if (strcmp(argv[2], "-M") == 0) {
+        global_server_mode = BACKUP_MANAGER;
+    } else if (strcmp(argv[2], "-B") == 0) {
+        global_server_mode = BACKUP;
+
+        if (argc < 5) { 
+            fprintf(stderr, "Necessário especificar ip e porta quando MODO = B\n");
+            exit(1);
+		}
+
+        strncpy(manager_ip, argv[3], 255);
+        manager_ip[255] = '\0'; 
+
+        manager_port = atoi(argv[4]);
+        if (manager_port <= 0) { 
+            fprintf(stderr, "Porta inválida: %s\n", argv[4]);
+            exit(1);
+        }
+
+    } else {
+        fprintf(stderr, "Modo inválido: %s\n", argv[2]);
+        fprintf(stderr, "Uso: ./server ID -MODO [ip porta]\n");
+		fprintf(stderr, "ID = numero natural\n");
+        fprintf(stderr, "MODO = M ou B (manager ou backup, respectivamente)\n");
+        fprintf(stderr, "ip e porta desnecessario se MODO = M\n");
+        exit(1);
+    }
+}
+
+
+int main(int argc, char* argv[]) {
+
+	parse_server_arguments(argc, argv);
+
+	
+
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
 
 	contextTable = HashTable_create(30); 
             
-	
+
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
 	}
@@ -174,7 +217,33 @@ int main() {
 	
 	uint16_t receive_socket_port = interface_socket_port + 1;
 	uint16_t send_socket_port = interface_socket_port + 2;
+	uint16_t replica_socket_port = interface_socket_port + 3;
 
+
+	pthread_t replication_thread;
+	if (global_server_mode == BACKUP_MANAGER)
+	{
+		ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
+		args->id = id;
+		args->port = replica_socket_port;
+
+		pthread_create(&replication_thread, NULL, manage_replicas, (void*) args);
+		pthread_detach(replication_thread);
+	}else if (global_server_mode == BACKUP)
+	{
+		BackupArgs *args = (BackupArgs *)malloc(sizeof(BackupArgs)); 
+		args->id = id;
+		strncpy(args->hostname, manager_ip, sizeof(args->hostname) - 1);
+		args->hostname[sizeof(args->hostname) - 1] = '\0';
+		args->port = manager_port;
+
+		pthread_create(&replication_thread, NULL, run_as_backup, (void*) args);
+		pthread_detach(replication_thread);
+	}else
+	{
+		fprintf(stderr, "Unknown server mode.\n");
+		exit(1);
+	}
 
 	receive_serv_addr.sin_family = AF_INET;
     receive_serv_addr.sin_port = htons(receive_socket_port);
@@ -216,6 +285,7 @@ int main() {
 
     return 0;
 }
+
 
 void perror_exit(const char *msg) {
 	perror(msg);
@@ -342,10 +412,9 @@ void *interface(void* arg) {
 			int total_packets = 1;
 			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
 
-			if(!send_packet(interface_socket,&packet)){
+			if(send_packet(interface_socket,&packet) != OK){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
-				free(files);
 			}
 
 			
@@ -426,8 +495,15 @@ void *interface(void* arg) {
 
 			pthread_mutex_lock(&session->user_context->lock);
 			session->user_context->sessions[session->session_index] = NULL;
+
+			ReplicaEvent event;
+			create_client_disconnected_event(&event, session->user_context->username, session->device_address);
+
     		pthread_mutex_unlock(&session->user_context->lock);
-			
+
+			notify_replicas(&event);
+			free_event(&event);
+			break;
 		}
 		
 		default:
@@ -459,22 +535,62 @@ void *send_f(void* arg) {
 	pthread_exit(NULL);
 }
 
-int should_process_file(FileNode *list, const char *filepath) {
+int get_file_status(FileNode *list, const char *filepath) {
 	if (!list){
-		//fprintf(stderr, "No files saved\n");
-		return 1;
+		return FILE_STATUS_NOT_FOUND;
 	}
 
 	FileNode *file_node = FileLinkedList_get(list, filepath);
 
 	if (!file_node){
-		//fprintf(stderr, "File not found\n");
-		return 1;
+		return FILE_STATUS_NOT_FOUND;
 	}
 
 	uint32_t old_crc = file_node->crc;
     uint32_t new_crc = crc32(filepath);
-    return (new_crc != old_crc);
+
+	if (new_crc != old_crc)
+	{
+		return FILE_STATUS_UPDATED;
+	}
+
+    return FILE_STATUS_EXISTS;
+}
+
+void handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
+    create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
+	char *filepath = read_file_from_socket(receive_socket, folder_path);
+	
+	if(session->active ){
+		fprintf(stderr, "File received.\n");
+		switch (get_file_status(session->user_context->file_list, filepath)) {
+			case FILE_STATUS_NOT_FOUND:
+				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
+					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+				}
+				break;
+			case FILE_STATUS_UPDATED:{
+				FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
+				file_node->crc = crc32(filepath);
+			}
+		}	
+
+		if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
+		{
+			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
+			send_file_to_session(send_to_index, session->user_context, filepath);
+		}
+	}
+
+	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filepath != NULL){
+		ReplicaEvent event;
+		create_file_upload_event(&event, session->user_context->username, session->device_address, filepath);
+		notify_replicas(&event);
+		free_event(&event);
+		
+	}
+
+	free(filepath);
 }
 
 // Recebe os arquivos do cliente
@@ -485,26 +601,7 @@ void *receive(void* arg) {
 	char *folder_path = get_user_folder(session->user_context->username);
 	while (session->active)
 	{
-		
-
-		create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
-		char *filepath = read_file_from_socket(receive_socket, folder_path);
-		
-		if(session->active && should_process_file(session->user_context->file_list, filepath)){
-			FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
-			if(!file_node){
-				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
-					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
-				}
-			}else{
-				file_node->crc = crc32(filepath);
-			}
-			
-			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
-			send_file_to_session(send_to_index, session->user_context, filepath);
-		}
-
-		free(filepath);
+		handle_incoming_file(session,receive_socket,folder_path);
 	}
 	
 	free(folder_path);
