@@ -2,6 +2,7 @@
 #include "./serverRoles.h"
 #include "replica.h"
 #include <stdio.h>
+#include <linux/limits.h>
 
 const int ANSWER_OK = 1;
 
@@ -293,8 +294,10 @@ void perror_exit(const char *msg) {
 }
 
 int receive_command(int socketfd){
-	Packet packet = read_packet(socketfd);
-	return packet.type;
+	Packet *packet = read_packet(socketfd);
+	PacketTypes type = packet->type;
+	free(packet);
+	return type;
 }
 
 char *get_user_folder(const char *username){
@@ -408,36 +411,34 @@ void *interface(void* arg) {
 		case PACKET_LIST:{
 			char *files = list_files(folder_path);
 
-			int seqn = 0;
-			int total_packets = 1;
-			Packet packet = create_data_packet(seqn,total_packets,strlen(files),files);
+			Packet *packet = create_packet(PACKET_DATA, strlen(files), files);
 
-			if(send_packet(interface_socket,&packet) != OK){
+			if(send_packet(interface_socket, packet) != OK){
 				fprintf(stderr, "ERROR responding to list_server");
 				free(folder_path);
+				free(packet);
 			}
-
 			
 			free(files);
-		}
-			
+			free(packet);
 			
 			break;
+		}
 
 		case PACKET_DOWNLOAD: {
 			//printf("DOWNLOAD requisitado\n");
 
-    		Packet packet = read_packet(interface_socket);
-    		if (packet.length == 0 || !packet._payload) {
+    		Packet *packet = read_packet(interface_socket);
+    		if (packet->length == 0 /* || !packet->payload */) {
         		fprintf(stderr, "ERROR invalid file name.\n");
         		break;
     		}
 
-    		printf("Requested file: '%.*s'\n", packet.length, packet._payload);
+    		printf("Requested file: '%.*s'\n", packet->length, packet->payload);
 
 
     		char filepath[512];
-    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet.length, packet._payload);
+    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet->length, packet->payload);
 
     		if (access(filepath, F_OK) != 0) {
         		fprintf(stderr, "ERROR file not found: %s\n", filepath);
@@ -453,14 +454,14 @@ void *interface(void* arg) {
 		case PACKET_DELETE: {
     		//printf("DELETE requisitado\n");
 			
-    		Packet packet = read_packet(interface_socket);
-    		if (packet.length == 0 || !packet._payload) {
+    		Packet *packet = read_packet(interface_socket);
+    		if (packet->length == 0 /* || !packet.payload */) {
         		fprintf(stderr, "ERROR invalid file name\n");
         		break;
     		}
 
     		char filepath[512];
-    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet.length, packet._payload);
+    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet->length, packet->payload);
 
     		if (access(filepath, F_OK) != 0) {
         		fprintf(stderr, "ERROR file not found: %s\n", filepath);
@@ -562,7 +563,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 	char *filepath = read_file_from_socket(receive_socket, folder_path);
 	
 	if(session->active ){
-		fprintf(stderr, "File received.\n");
+		fprintf(stderr, "File received. Filepath: %s\n", filepath);
 		switch (get_file_status(session->user_context->file_list, filepath)) {
 			case FILE_STATUS_NOT_FOUND:
 				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){

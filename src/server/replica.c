@@ -124,8 +124,8 @@ void replica_list_destroy() {
 int send_event(ReplicaEvent* event, int socketfd){
     char *serialized_event = serialize_replica_event(event);
 
-    Packet packet = create_control_packet(PACKET_REPLICA_MSG, strlen(serialized_event), serialized_event);
-    int return_code = send_packet(socketfd, &packet);
+    Packet *packet = create_packet(PACKET_REPLICA_MSG, strlen(serialized_event), serialized_event);
+    int return_code = send_packet(socketfd, packet);
 
     if (event->type == EVENT_FILE_UPLOADED)
     {

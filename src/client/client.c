@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE // Concerta o aviso chato sobre o h_addr do hostent
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -114,16 +115,16 @@ int get_command(char* command, char* arg)
 }
 
 void list_server(int socketfd){
-    Packet control_packet = create_control_packet(PACKET_LIST, 1, NULL);
+    Packet *control_packet = create_packet(PACKET_LIST, 0, NULL);
 
-    if (!send_packet(socketfd, &control_packet)) {
+    if (send_packet(socketfd, control_packet) != OK) {
         fprintf(stderr, "ERROR sending control packet (list_server)\n");
         return;
     }
 
-    Packet packet = read_packet(socketfd);
+    Packet *packet = read_packet(socketfd);
 
-    fprintf(stderr, "Server files: \n%s\n", packet._payload);
+    fprintf(stderr, "Server files: \n%s\n", packet->payload);
 }
 
 void list_client() {
@@ -167,18 +168,20 @@ void download(const char *filename, int socketfd) {
     //printf("Download do arquivo: %s\n", filename);
 
     // Envia o comando para sinalizar um download
-    Packet command = create_control_packet(PACKET_DOWNLOAD, 0, NULL);
-    if (!send_packet(socketfd, &command)) {
+    Packet *command = create_packet(PACKET_DOWNLOAD, 0, NULL);
+    if (send_packet(socketfd, command) != OK) {
         fprintf(stderr, "ERROR sending download command\n");
         return;
     }
+    free(command);
 
     // Envia o nome do arquivo requisitado
-    Packet name = create_control_packet(PACKET_SEND, strlen(filename), filename);
-    if (!send_packet(socketfd, &name)) {
+    Packet *name = create_packet(PACKET_SEND, strlen(filename), filename); // TODO: não enviar o caracter nulo no final
+    if (send_packet(socketfd, name) != OK) {
         fprintf(stderr, "ERROR sending file name\n");
         return;
     }
+    free(name);
 
     // SAlva o arquivo no diretorio atual
     read_file_from_socket(socketfd, ".");
@@ -189,30 +192,33 @@ void delete(const char *filename, int socketfd) {
     //printf("Exclusão do arquivo: %s\n", filename);
 
     // Envia o comando para sinalizar a exclusao
-    Packet command = create_control_packet(PACKET_DELETE, 0, NULL);
-    if (!send_packet(socketfd, &command)) {
+    Packet *command = create_packet(PACKET_DELETE, 0, NULL);
+    if (send_packet(socketfd, command) != OK) {
         fprintf(stderr, "ERROR sending delete command\n");
         return;
     }
+    free(command);
 
     // Envia o nome do arquivo a ser deletado
-    Packet name = create_control_packet(PACKET_SEND, strlen(filename), filename);
-    if (!send_packet(socketfd, &name)) {
+    Packet *name = create_packet(PACKET_SEND, strlen(filename), filename); // TODO: não enviar o caracter nulo no final
+    if (send_packet(socketfd, name) != OK) {
         fprintf(stderr, "ERROR sending file name\n");
         return;
     }
+    free(name);
 
     printf("Exclusão solicitada.\n");
 }
 void close_client(int socketfd){
     signal_shutdown = 1;
 
-    Packet control_packet = create_control_packet(PACKET_EXIT, 1, NULL);
+    Packet *control_packet = create_packet(PACKET_EXIT, 0, NULL);
 
-    if (!send_packet(socketfd, &control_packet)) {
+    if (send_packet(socketfd, control_packet) != OK) {
         fprintf(stderr, "ERROR sending control packet (close client)\n");
         return;
     }
+    free(control_packet);
 }
 
 void *start_console_input_thread(void *arg){
@@ -293,8 +299,8 @@ void *start_directory_watcher_thread(void* arg) {
     do{
         usleep(200);
         wd = inotify_add_watch(fd, sync_dir_path, 
-           // IN_CREATE 
-           // | 
+            IN_CREATE 
+            | 
             IN_CLOSE_WRITE);
     }while(wd < 0);
   

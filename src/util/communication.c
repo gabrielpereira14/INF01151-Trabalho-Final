@@ -2,212 +2,129 @@
 #include "communication.h"
 #include <stdio.h>
 
-unsigned char* serialize_packet(const Packet* pkt, size_t* out_size) {
-    if (!pkt || (pkt->length > 0 && !pkt->_payload)) {
-        printf("Invalid packet for serialization\n");
-        return NULL;
+void print_packet(Packet* packet) {
+    char *type_name;
+    switch (packet->type) {
+        case PACKET_DATA:
+            type_name = "DATA";
+            break;
+        case PACKET_SEND:
+            type_name = "SEND";
+            break;
+        case PACKET_LIST:
+            type_name = "LIST";
+            break;
+        case PACKET_DOWNLOAD:
+            type_name = "DOWNLOAD";
+            break;
+        case PACKET_DELETE:
+            type_name = "DELETE";
+            break;
+        case PACKET_EXIT:
+            type_name = "EXIT";
+            break;
+        case PACKET_REPLICA_MSG:
+            type_name = "MSG";
+            break;
+        case PACKET_CONNECTION_CLOSED:
+            type_name = "CLOSED";
+            break;
     }
 
-    size_t total_size = sizeof(uint16_t) * 3 + sizeof(uint32_t) + pkt->length;
-    uint8_t* buffer = (uint8_t*)malloc(total_size);
-    if (!buffer) return NULL;
-
-    size_t offset = 0;
-
-    // Write type
-    buffer[offset++] = pkt->type & 0xFF;
-    buffer[offset++] = (pkt->type >> 8) & 0xFF;
-
-    // Write seqn
-    buffer[offset++] = pkt->seqn & 0xFF;
-    buffer[offset++] = (pkt->seqn >> 8) & 0xFF;
-
-    // Write total_size
-    buffer[offset++] = pkt->total_size & 0xFF;
-    buffer[offset++] = (pkt->total_size >> 8) & 0xFF;
-    buffer[offset++] = (pkt->total_size >> 16) & 0xFF;
-    buffer[offset++] = (pkt->total_size >> 24) & 0xFF;
-
-    // Write length
-    buffer[offset++] = pkt->length & 0xFF;
-    buffer[offset++] = (pkt->length >> 8) & 0xFF;
-
-    // Write payload (se existir)
-    if (pkt->length > 0) {
-        memcpy(buffer + offset, pkt->_payload, pkt->length);
-        offset += pkt->length;
-    }
-
-    if (out_size) *out_size = offset;
-    return buffer;
-}
-
-Packet deserialize_packet(unsigned char *serialized_packet, size_t packet_size){
-    Packet packet = {0}; 
-
-    if (!serialized_packet) return packet;
-
-    size_t offset = 0;
-
-    packet.type = serialized_packet[offset];
-    offset++;
-    packet.type |= serialized_packet[offset] << 8;
-    offset++;
-
-    packet.seqn = serialized_packet[offset];
-    offset++;
-    packet.seqn |= serialized_packet[offset] << 8;
-    offset++;
-
-    packet.total_size = serialized_packet[offset];
-    offset++;
-    packet.total_size |= serialized_packet[offset] << 8;
-    offset++;
-    packet.total_size |= serialized_packet[offset] << 16;
-    offset++;
-    packet.total_size |= serialized_packet[offset] << 24;
-    offset++;
-
-    packet.length = serialized_packet[offset];
-    offset++;
-    packet.length |= serialized_packet[offset] << 8;
-    offset++;
-
-    if (packet.length > 0) {
-        if (offset + packet.length > packet_size) {
-            packet._payload = NULL;
-            return packet;
-        }
-        char *buffer = malloc(packet.length + 1);  
-        if (!buffer) {
-            packet._payload = NULL;
-            return packet;
-        }
-        memcpy(buffer, serialized_packet + offset, packet.length);
-        buffer[packet.length] = '\0';  
-        packet._payload = buffer;
+    printf("Packet - type: %s length: %i ",
+        type_name,
+        packet->length);
+        
+    if (packet->length > 0) {
+        printf("payload: %.*s", packet->length, packet->payload);
     } else {
-        packet._payload = NULL;
+        printf("empty_payload");
     }
-    
+
+    printf("\n");
+}
+
+Packet* create_packet(const PacketTypes type, const uint16_t lenght, const char *payload){
+    Packet *packet = (Packet*)malloc(sizeof(Packet) + lenght);
+    packet->type = type;
+    packet->length = lenght;
+    if (lenght > 0) {
+        if (payload == NULL) {
+            fprintf(stderr, "ERRO: tentativa de criacao de pacote com conteúdo inválido\n");
+            exit(1);
+        }
+
+        memcpy(packet->payload, payload, lenght);
+    }
 
     return packet;
 }
 
-
-void print_packet(Packet packet) {
-    printf("Packet - seqn: %i total_size: %i type: %i length: %i payload: %.*s\n",
-           packet.seqn,
-           packet.total_size,
-           packet.type,
-           packet.length,
-           packet.length,
-           packet._payload ? packet._payload : "");
-}
-
-
-Packet create_data_packet(const uint16_t seqn,const uint32_t total_size,const uint16_t lenght, const char *payload){
-    Packet packet;
-    packet.seqn = seqn;
-    packet.total_size = total_size;
-    packet.type = PACKET_DATA;
-    packet._payload = payload;
-    packet.length = lenght;
-
-    return packet;
-}
-
-Packet create_control_packet(const int type, const uint16_t lenght, const char *payload){
-    Packet packet;
-    packet.seqn = 0;
-    packet.total_size = 1;
-    packet.type = type;
-    packet._payload = payload;
-    packet.length = lenght;
-
-    return packet;
-}
-
-
-
-Packet read_packet(int newsockfd) {
-    unsigned char header[PACKET_HEADER_SIZE];
-    ssize_t n = 0;
+Packet *read_packet(int newsockfd) {
+    Packet *packet = (Packet*)malloc(sizeof(Packet));
     size_t total_read = 0;
 
     // Read header
-    while (total_read < PACKET_HEADER_SIZE) {
-        n = read(newsockfd, header + total_read, PACKET_HEADER_SIZE - total_read);
-        if (n == 0) {
-            Packet closed_pkt = {0};
-            closed_pkt.type = PACKET_CONNECTION_CLOSED; 
+    while (total_read < sizeof(Packet)) {
+        int bytes_read = read(newsockfd, packet + total_read, sizeof(packet) - total_read);
+        if (bytes_read == 0) {
+            free(packet);
+            Packet *closed_pkt = create_packet(PACKET_CONNECTION_CLOSED, 0, NULL);
             return closed_pkt;
         }
-        if (n < 0) {
+        if (bytes_read < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "read: No data available (non-blocking).\n");
             } else {
                 perror("read error on header");
             }
-            Packet empty = {0};
-            return empty;
+            free(packet);
+            return NULL;
         }
-        total_read += n;
+        total_read += bytes_read;
     }
 
-    uint16_t payload_length = header[8] | (header[9] << 8);
-    size_t total_packet_size = PACKET_HEADER_SIZE + payload_length;
-
-    unsigned char *buffer = malloc(total_packet_size);
-    if (!buffer) {
-        perror("malloc failed");
-        Packet empty = {0};
-        return empty;
-    }
-
-    memcpy(buffer, header, PACKET_HEADER_SIZE);
+    packet = realloc(packet, sizeof(Packet) + packet->length);
 
     size_t payload_read = 0;
-    while (payload_read < payload_length) {
-        n = read(newsockfd, buffer + PACKET_HEADER_SIZE + payload_read, payload_length - payload_read);
-        if (n == 0) {
-            free(buffer);
-            Packet closed_pkt = {0};
-            closed_pkt.type = PACKET_CONNECTION_CLOSED;
+    while (payload_read < packet->length) {
+        int bytes_received = read(newsockfd, packet->payload + payload_read, packet->length - payload_read);
+        if (bytes_received == 0) {
+            free(packet);
+            Packet *closed_pkt = create_packet(PACKET_CONNECTION_CLOSED, 0, NULL);
             return closed_pkt;
         }
-        if (n < 0) {
+        if (bytes_received < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "read: No data available (non-blocking) during payload.\n");
             } else {
                 perror("read error on payload");
             }
-            free(buffer);
-            Packet empty = {0};
-            return empty;
+            free(packet);
+            return NULL;
         }
-        payload_read += n;
+        payload_read += bytes_received;
     }
 
-    Packet pkt = deserialize_packet(buffer, total_packet_size);
-    free(buffer);
-    return pkt;
+    print_packet(packet);
+
+    return packet;
 }
 
 
-void write_payload_to_file(char *filename, int socket) {
+void write_packets_to_file(char *filename, uint64_t num_packets, int socket) {
     FILE *file = fopen(filename, "w");
     if (file == NULL) {
         printf("Error opening file!\n");
-        printf("\n%s", filename);
+        printf("\n%s\n", filename);
         return;
     }
 
-    Packet packet;
-    do {
-        packet = read_packet(socket);
-        fwrite(packet._payload, packet.length, 1, file);
-    } while (packet.seqn < packet.total_size - 1);
+    for (size_t i = 0; i < num_packets; i++) {
+        Packet *packet = read_packet(socket);
+        fwrite(packet->payload, packet->length, sizeof(char), file);
+        free(packet);
+    }
 
     fflush(file);  // important!
     if (fsync(fileno(file)) == -1) {
@@ -215,8 +132,6 @@ void write_payload_to_file(char *filename, int socket) {
     }
     fclose(file);
 }
-
-
 
 size_t get_file_size(FILE *file_ptr){
     fseek(file_ptr, 0L, SEEK_END);
@@ -227,12 +142,9 @@ size_t get_file_size(FILE *file_ptr){
 }
 
 int send_packet(int sockfd, const Packet *packet){
-    size_t serialized_packet_len = 0;
-    unsigned char * serialized_packet = serialize_packet(packet, &serialized_packet_len);
+    if (packet == NULL) return 0; // TODO código de erro
 
-    if (!serialized_packet) return 0;
-
-    ssize_t bytes_sent = send(sockfd, serialized_packet, serialized_packet_len, MSG_NOSIGNAL); // Or whatever flags you need
+    ssize_t bytes_sent = send(sockfd, packet, sizeof(Packet) + packet->length, MSG_NOSIGNAL); // Or whatever flags you need
     if (bytes_sent == -1) {
         if (errno == EPIPE) {
             return SOCKET_CLOSED; 
@@ -244,7 +156,6 @@ int send_packet(int sockfd, const Packet *packet){
     
     return OK;
 }
-
 
 char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
     char *buffer = malloc(chunk_size);
@@ -258,43 +169,53 @@ char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
 
     return buffer;
 }
-void send_file(const int sockfd, char *filepath){
 
+void send_file(const int sockfd, char *filepath) {
     FILE *file_ptr = fopen(filepath, "rb");
-    if(file_ptr == NULL)
-    {
+    if(file_ptr == NULL) {
         printf("Error opening file!");   
         return;           
     }
 
     size_t file_size = get_file_size(file_ptr);
 
-    int total_packet_amount = (file_size + PAYLOAD_SIZE - 1) / PAYLOAD_SIZE;
-    int current_packet = 0;
+    int total_packet_amount = (file_size + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE;
 
     size_t total_bytes_read = 0;
     size_t bytes_read;
 
-    char *file_name = basename(filepath);
-    Packet control_packet = create_control_packet(PACKET_SEND, strlen(file_name), file_name);
+    char *file_name = basename(filepath); // TODO: modificar para manter diretórios
 
-    if (!send_packet(sockfd, &control_packet)) {
-        fprintf(stderr, "ERROR sending control packet\n");
+    FileAnnoucement *announcement = (FileAnnoucement*)malloc(sizeof(FileAnnoucement) + strlen(file_name) - 1);
+    announcement->num_packets = total_packet_amount;
+    announcement->filename_length = strlen(file_name);
+    memcpy(announcement->filename, file_name, strlen(file_name) - 1);
+
+    Packet *announcement_packet = create_packet(PACKET_SEND, strlen(file_name), (char*)announcement);
+
+    if (send_packet(sockfd, announcement_packet) != OK) {
+        fprintf(stderr, "ERROR sending file announcement\n");
         fclose(file_ptr);
         return;
     }
 
+    free(announcement);
+    free(announcement_packet);
+
+
+    int current_packet = 0;
     do
     {
-        char *data = read_file_chunk(file_ptr, PAYLOAD_SIZE, &bytes_read);
-        Packet packet = create_data_packet(current_packet,total_packet_amount, bytes_read, data);
+        char *chunk = read_file_chunk(file_ptr, FILE_CHUNK_SIZE, &bytes_read);
+        Packet *packet = create_packet(PACKET_DATA, bytes_read, chunk);
 
-        if (!send_packet(sockfd, &packet)) {
-            fprintf(stderr, "ERROR writing to socket\n");
-            free(data);
+        if (send_packet(sockfd, packet) != OK) {
+            fprintf(stderr, "ERROR sending file data packet\n");
+            free(chunk);
             break;
         }
-        free(data);
+        free(chunk);
+        free(packet);
         
         total_bytes_read += bytes_read;
         current_packet += 1;
@@ -304,16 +225,20 @@ void send_file(const int sockfd, char *filepath){
 }
 
 char *read_file_from_socket(int socketfd, const char *path_to_save){
-    Packet packet = read_packet(socketfd);
-    char *filename = malloc(packet.length + 1);
-    memcpy(filename, packet._payload, packet.length);
-    filename[packet.length] = '\0';
-    if (packet.length == 0){
+    Packet *packet = read_packet(socketfd);
+    if (packet->length == 0){
         return NULL;
     }
+
+    FileAnnoucement *announcement = (FileAnnoucement*)packet->payload;
+    
+    char *filename = malloc(packet->length + 1);
+    memcpy(filename, announcement->filename, announcement->filename_length);
+    filename[announcement->filename_length] = '\0';
+    
     char *filepath = malloc(strlen(path_to_save) + 1 + strlen(filename) + 1);
     sprintf(filepath, "%s/%s", path_to_save, filename); 
-    write_payload_to_file(filepath,socketfd);
+    write_packets_to_file(filepath, announcement->num_packets, socketfd);
 
     free(filename);
     return filepath;

@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE // Concerta o aviso chato sobre o h_addr do hostent
 #include "./serverRoles.h"
 #include "./serverCommon.h"
 #include "replica.h"
@@ -7,6 +8,8 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sys/select.h>
+#include <netdb.h>
 
 
 #define HEARTBEAT_TIMEOUT_SECONDS 5
@@ -128,8 +131,9 @@ void *replica_listener_thread(void *arg) {
                 break;
             }
 
-            Packet packet = read_packet(newsockfd);
-            int replica_id = atoi(packet._payload);
+            Packet *packet = read_packet(newsockfd);
+            int replica_id = atoi(packet->payload);
+            free(packet);
 
             char ip_str[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(cli_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
@@ -249,8 +253,9 @@ void *connect_to_server_thread(void *arg) {
 
         char *id_string = malloc(2);
         sprintf(id_string, "%d", id);
-        Packet packet = create_control_packet(PACKET_REPLICA_MSG, strlen(id_string), id_string);
-        send_packet(socketfd, &packet);
+        Packet *packet = create_packet(PACKET_REPLICA_MSG, strlen(id_string), id_string);
+        send_packet(socketfd, packet);
+        free(packet);
 
         while (1) {
             pthread_mutex_lock(&mode_change_mutex);
@@ -263,10 +268,10 @@ void *connect_to_server_thread(void *arg) {
             }
 
             if (has_data(socketfd, 1000) > 0) {
-                Packet packet = read_packet(socketfd);
-                switch (packet.type) {
+                Packet *packet = read_packet(socketfd);
+                switch (packet->type) {
                     case PACKET_REPLICA_MSG:{
-                        ReplicaEvent event = deserialize_replica_event(packet._payload);
+                        ReplicaEvent event = deserialize_replica_event(packet->payload);
                         switch (event.type) {
                         case EVENT_CLIENT_CONNECTED:
                             initialize_user_session_and_threads(event.device_address, -1, -1, -1, event.username);
@@ -310,7 +315,7 @@ void *connect_to_server_thread(void *arg) {
                     }
                         
                     default :{
-                        fprintf(stderr, "[Backup %d Connection Thread] Unsupported packet type: %d\n",id, packet.type);
+                        fprintf(stderr, "[Backup %d Connection Thread] Unsupported packet type: %d\n",id, packet->type);
                         break;
                     }
                 }
