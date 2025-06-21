@@ -169,16 +169,12 @@ void parse_server_arguments(int argc, char *argv[]) {
 
 
 int main(int argc, char* argv[]) {
-
 	parse_server_arguments(argc, argv);
-
-	
 
 	// Define a função de terminação do programa
 	signal(SIGINT, termination);
 
 	contextTable = HashTable_create(30); 
-            
 
 	if(create_folder_if_not_exists("./", USER_FILES_FOLDER) != 0){
 		fprintf(stderr, "Failed to create \"user files\" folder");
@@ -199,13 +195,11 @@ int main(int argc, char* argv[]) {
 	struct sockaddr_in interface_serv_addr, send_serv_addr, receive_serv_addr;
 
 	uint16_t interface_socket_port = 4000;
-	
 
     interface_serv_addr.sin_family = AF_INET;
 	interface_serv_addr.sin_port = htons(interface_socket_port);
 	interface_serv_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(interface_serv_addr.sin_zero), 8);
-
    
 	srand((unsigned) time(NULL));
 	while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
@@ -214,24 +208,20 @@ int main(int argc, char* argv[]) {
     } ;
 
 	fprintf(stderr, "Server running on port %d\n", interface_socket_port);
-
 	
 	uint16_t receive_socket_port = interface_socket_port + 1;
 	uint16_t send_socket_port = interface_socket_port + 2;
 	uint16_t replica_socket_port = interface_socket_port + 3;
 
-
 	pthread_t replication_thread;
-	if (global_server_mode == BACKUP_MANAGER)
-	{
+	if (global_server_mode == BACKUP_MANAGER) {
 		ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
 		args->id = id;
 		args->port = replica_socket_port;
 
 		pthread_create(&replication_thread, NULL, manage_replicas, (void*) args);
 		pthread_detach(replication_thread);
-	}else if (global_server_mode == BACKUP)
-	{
+	} else if (global_server_mode == BACKUP) {
 		BackupArgs *args = (BackupArgs *)malloc(sizeof(BackupArgs)); 
 		args->id = id;
 		strncpy(args->hostname, manager_ip, sizeof(args->hostname) - 1);
@@ -240,8 +230,7 @@ int main(int argc, char* argv[]) {
 
 		pthread_create(&replication_thread, NULL, run_as_backup, (void*) args);
 		pthread_detach(replication_thread);
-	}else
-	{
+	} else {
 		fprintf(stderr, "Unknown server mode.\n");
 		exit(1);
 	}
@@ -256,11 +245,11 @@ int main(int argc, char* argv[]) {
     send_serv_addr.sin_addr.s_addr = INADDR_ANY;
     bzero(&(send_serv_addr.sin_zero), 8);
 
-	if (bind(sock_receive_listen, (struct sockaddr *) &receive_serv_addr, sizeof(receive_serv_addr)) < 0){ 
+	if (bind(sock_receive_listen, (struct sockaddr *) &receive_serv_addr, sizeof(receive_serv_addr)) < 0) { 
 			perror_exit("ERRO vinulando o socket de espera da coneccao de receive: ");
 	}
 
-	if (bind(sock_send_listen, (struct sockaddr *) &send_serv_addr, sizeof(send_serv_addr)) < 0){ 
+	if (bind(sock_send_listen, (struct sockaddr *) &send_serv_addr, sizeof(send_serv_addr)) < 0) { 
 		perror_exit("ERRO vinulando o socket de espera da coneccao de send: ");
 	}
 	
@@ -282,7 +271,6 @@ int main(int argc, char* argv[]) {
 
 		handle_new_connection(sock_interface);
 	}
-			
 
     return 0;
 }
@@ -313,7 +301,6 @@ char *get_user_folder(const char *username){
 
 	return path;
 }
-
 
 char* list_files(const char *folder_path) {
     struct dirent *entry;
@@ -562,7 +549,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
 	char *filepath = read_file_from_socket(receive_socket, folder_path);
 	
-	if(session->active ){
+	if(session->active) {
 		fprintf(stderr, "File received. Filepath: %s\n", filepath);
 		switch (get_file_status(session->user_context->file_list, filepath)) {
 			case FILE_STATUS_NOT_FOUND:
@@ -574,7 +561,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 				FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
 				file_node->crc = crc32(filepath);
 			}
-		}	
+		}
 
 		if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
 		{

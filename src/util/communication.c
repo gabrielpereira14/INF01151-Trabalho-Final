@@ -36,7 +36,10 @@ void print_packet(Packet* packet) {
         packet->length);
         
     if (packet->length > 0) {
-        printf("payload: %.*s", packet->length, packet->payload);
+        printf("payload: ");
+        for (size_t i = 0; i < packet->length; i++) {
+            printf("%c", packet->payload[i]);
+        }
     } else {
         printf("empty_payload");
     }
@@ -66,12 +69,14 @@ Packet *read_packet(int newsockfd) {
 
     // Read header
     while (total_read < sizeof(Packet)) {
-        int bytes_read = read(newsockfd, packet + total_read, sizeof(packet) - total_read);
+        int bytes_read = read(newsockfd, ((char*)packet) + total_read, sizeof(Packet) - total_read);
+
         if (bytes_read == 0) {
             free(packet);
             Packet *closed_pkt = create_packet(PACKET_CONNECTION_CLOSED, 0, NULL);
             return closed_pkt;
         }
+
         if (bytes_read < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "read: No data available (non-blocking).\n");
@@ -81,6 +86,7 @@ Packet *read_packet(int newsockfd) {
             free(packet);
             return NULL;
         }
+
         total_read += bytes_read;
     }
 
@@ -88,12 +94,14 @@ Packet *read_packet(int newsockfd) {
 
     size_t payload_read = 0;
     while (payload_read < packet->length) {
-        int bytes_received = read(newsockfd, packet->payload + payload_read, packet->length - payload_read);
+        int bytes_received = read(newsockfd, ((char*)packet) + sizeof(Packet) + payload_read, packet->length - payload_read);
+
         if (bytes_received == 0) {
             free(packet);
             Packet *closed_pkt = create_packet(PACKET_CONNECTION_CLOSED, 0, NULL);
             return closed_pkt;
         }
+
         if (bytes_received < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "read: No data available (non-blocking) during payload.\n");
@@ -103,10 +111,9 @@ Packet *read_packet(int newsockfd) {
             free(packet);
             return NULL;
         }
+
         payload_read += bytes_received;
     }
-
-    print_packet(packet);
 
     return packet;
 }
@@ -179,20 +186,18 @@ void send_file(const int sockfd, char *filepath) {
 
     size_t file_size = get_file_size(file_ptr);
 
-    int total_packet_amount = (file_size + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE;
-
-    size_t total_bytes_read = 0;
-    size_t bytes_read;
+    int total_packet_amount = file_size / FILE_CHUNK_SIZE + (file_size % FILE_CHUNK_SIZE ? 1 : 0);
 
     char *file_name = basename(filepath); // TODO: modificar para manter diretórios
 
-    FileAnnoucement *announcement = (FileAnnoucement*)malloc(sizeof(FileAnnoucement) + strlen(file_name) - 1);
+    FileAnnoucement *announcement = (FileAnnoucement*)malloc(sizeof(FileAnnoucement) + strlen(file_name));
     announcement->num_packets = total_packet_amount;
     announcement->filename_length = strlen(file_name);
-    memcpy(announcement->filename, file_name, strlen(file_name) - 1);
+    memcpy(announcement->filename, file_name, strlen(file_name));
 
-    Packet *announcement_packet = create_packet(PACKET_SEND, strlen(file_name), (char*)announcement);
-
+    Packet *announcement_packet = create_packet(PACKET_SEND, sizeof(FileAnnoucement) + strlen(file_name), (char*)announcement);
+    FileAnnoucement *announcement_teste = (FileAnnoucement*)(announcement_packet->payload);
+    
     if (send_packet(sockfd, announcement_packet) != OK) {
         fprintf(stderr, "ERROR sending file announcement\n");
         fclose(file_ptr);
@@ -203,9 +208,10 @@ void send_file(const int sockfd, char *filepath) {
     free(announcement_packet);
 
 
+    size_t total_bytes_read = 0;
     int current_packet = 0;
-    do
-    {
+    while (total_bytes_read < file_size) {
+        size_t bytes_read;
         char *chunk = read_file_chunk(file_ptr, FILE_CHUNK_SIZE, &bytes_read);
         Packet *packet = create_packet(PACKET_DATA, bytes_read, chunk);
 
@@ -219,7 +225,7 @@ void send_file(const int sockfd, char *filepath) {
         
         total_bytes_read += bytes_read;
         current_packet += 1;
-    } while (total_bytes_read < file_size);
+    }
 
     fclose(file_ptr);
 }
@@ -230,9 +236,9 @@ char *read_file_from_socket(int socketfd, const char *path_to_save){
         return NULL;
     }
 
-    FileAnnoucement *announcement = (FileAnnoucement*)packet->payload;
+    FileAnnoucement *announcement = (FileAnnoucement*)(packet->payload);
     
-    char *filename = malloc(packet->length + 1);
+    char *filename = malloc(announcement->filename_length + 1);
     memcpy(filename, announcement->filename, announcement->filename_length);
     filename[announcement->filename_length] = '\0';
     
@@ -241,6 +247,7 @@ char *read_file_from_socket(int socketfd, const char *path_to_save){
     write_packets_to_file(filepath, announcement->num_packets, socketfd);
 
     free(filename);
+    free(packet);
     return filepath;
 }
 
