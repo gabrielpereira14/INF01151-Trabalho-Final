@@ -524,13 +524,13 @@ void *send_f(void* arg) {
 }
 
 int get_file_status(FileNode *list, const char *filepath) {
-	if (!list){
+	if (list == NULL){
 		return FILE_STATUS_NOT_FOUND;
 	}
 
 	FileNode *file_node = FileLinkedList_get(list, filepath);
 
-	if (!file_node){
+	if (file_node == NULL){
 		return FILE_STATUS_NOT_FOUND;
 	}
 
@@ -550,24 +550,33 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 	char *filepath = read_file_from_socket(receive_socket, folder_path);
 	
 	if(session->active) {
-		fprintf(stderr, "File received. Filepath: %s\n", filepath);
+		fprintf(stderr, "File received from user %s session %i. Filepath: %s\n", session->user_context->username, session->session_index, filepath);
 		switch (get_file_status(session->user_context->file_list, filepath)) {
 			case FILE_STATUS_NOT_FOUND:
 				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
 					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
 				}
+
+				if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+					for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
+						send_file_to_session(send_to_index, session->user_context, filepath);
+					}
+				}
+
 				break;
-			case FILE_STATUS_UPDATED:{
+			case FILE_STATUS_UPDATED:
 				FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
 				file_node->crc = crc32(filepath);
-			}
+
+				if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+					for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
+						send_file_to_session(send_to_index, session->user_context, filepath);
+					}
+				}
+				break;
 		}
 
-		if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
-		{
-			int send_to_index = !session->session_index; //session_index poder ser só 1 ou 0
-			send_file_to_session(send_to_index, session->user_context, filepath);
-		}
+		
 	}
 
 	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filepath != NULL){
@@ -587,8 +596,7 @@ void *receive(void* arg) {
 	int receive_socket = session->sockets.receive_socketfd;
 
 	char *folder_path = get_user_folder(session->user_context->username);
-	while (session->active)
-	{
+	while (session->active) {
 		handle_incoming_file(session,receive_socket,folder_path);
 	}
 	

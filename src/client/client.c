@@ -18,8 +18,8 @@
 #include "../util/communication.h"
 
 #define EVENT_BUF_LEN (1024 * (sizeof(struct inotify_event) + 16))
-#define OK       0
-#define NO_INPUT 1
+#define GET_COMMAND_OK 0
+#define GET_COMMAND_NO_INPUT 1
 #define MAX_INPUT_SIZE 128
 #define MAX_COMMAND 13
 #define MAX_ARGUMENT 115
@@ -81,7 +81,7 @@ char *build_destination_path(const char *source_path) {
     return full_path;
 }
 
-int upload(const char *source_path){
+int upload(const char *source_path) {
     char *dest_path = build_destination_path(source_path);
     if (!dest_path) {
         fprintf(stderr, "ERROR: Failed to construct destination path.\n");
@@ -98,20 +98,19 @@ int upload(const char *source_path){
 }
 
 
-int get_command(char* command, char* arg)
-{
+int get_command(char* command, char* arg) {
     char input[MAX_INPUT_SIZE];
     
     fflush(stdout);
     if(fgets(input, sizeof(input), stdin) == NULL)
-        return NO_INPUT;
+        return GET_COMMAND_NO_INPUT;
 
 
     input[strcspn(input, "\n")] = 0;
     
     sscanf(input,"%12s %114s", command, arg);
     
-    return OK;
+    return GET_COMMAND_OK;
 }
 
 void list_server(int socketfd){
@@ -229,8 +228,7 @@ void *start_console_input_thread(void *arg){
     printf("Client started!\n");
 
 
-    while (strcmp(command, "exit") != 0)
-    {
+    while (strcmp(command, "exit") != 0) {
         command[0] = '\0';
         path[0] = '\0';
 
@@ -273,10 +271,9 @@ void *start_console_input_thread(void *arg){
 void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
-    while (signal_shutdown)
-	{
+    while (signal_shutdown == 0) {
 		char *filepath = read_file_from_socket(socket, sync_dir_path);
-        fprintf(stderr,"File received!\n");
+        fprintf(stderr,"File received! Filepath: %s\n", filepath);
 		free(filepath);
 	}
 	pthread_exit(NULL);
@@ -305,7 +302,7 @@ void *start_directory_watcher_thread(void* arg) {
     }while(wd < 0);
   
 
-    while (!signal_shutdown) {
+    while (signal_shutdown == 0) {
         ssize_t length = read(fd, buffer, EVENT_BUF_LEN);
 
         if (length < 0) {
