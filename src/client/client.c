@@ -22,6 +22,8 @@
 #define MAX_INPUT_SIZE 128
 #define MAX_COMMAND 13
 #define MAX_ARGUMENT 115
+#define NOTIFICATION_PORT 12345
+#define BUFFER_SIZE 256
 
 int signal_shutdown = 0;
 
@@ -392,6 +394,72 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
     return 0;
 }
 
+// Essa funcao roda em uma thread separada e aguarda notificacoes de nova conexao.
+void *notification_listener(void *arg) {
+    int sockfd, newsockfd;
+    struct sockaddr_in serv_addr, cli_addr;
+    socklen_t clilen = sizeof(cli_addr);
+    char buffer[BUFFER_SIZE];
+
+    // Cria o socket para notificacoes
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+       perror("Erro ao criar socket");
+       pthread_exit(NULL);
+    }
+
+    // Configura o endereco e porta para escuta
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    serv_addr.sin_port = htons(NOTIFICATION_PORT);
+
+    // Faz o bind do socket
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+       perror("Erro no bind");
+       close(sockfd);
+       pthread_exit(NULL);
+    }
+
+    // Coloca o socket em modo de escuta
+    listen(sockfd, 5);
+    printf("Thread de notificacao iniciada, aguardando mensagens na porta %d...\n", NOTIFICATION_PORT);
+
+    while (1) {
+         // Aceita uma nova conexao
+         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+         if (newsockfd < 0) {
+              perror("Erro no accept");
+              continue;
+         }
+         
+         // Le a mensagem enviada (novamente, o endereco do novo servidor)
+         memset(buffer, 0, BUFFER_SIZE);
+         int n = read(newsockfd, buffer, BUFFER_SIZE - 1);
+         if (n < 0) {
+              perror("Erro ao ler do socket");
+              close(newsockfd);
+              continue;
+         }
+         
+         // Exibe a notificacao recebida (por exemplo, "Novo servidor: 192.168.0.XXX")
+         printf("Notificacao recebida: %s\n", buffer);
+
+         //IMPLEMENTAR BUFFER TO SERVER
+
+         // RECONEXAO
+         int sock_interface;
+         if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
+            exit(EXIT_FAILURE);
+        }    
+
+         close(newsockfd);
+    }
+
+    close(sockfd);
+    pthread_exit(NULL);
+}
+
 int main(int argc, char* argv[]){ 
     char *username;
     char hostname[20];
@@ -461,10 +529,12 @@ int main(int argc, char* argv[]){
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
     pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
+    pthread_create(&reconnection_thread, NULL, notification_listener, NULL);
 
     pthread_join(console_thread, NULL);
     pthread_join(file_watcher_thread, NULL);
     pthread_join(receive_files_thread, NULL);
+    pthread_join(reconnection_thread, NULL);
 
 	close(sock_interface);
     return EXIT_SUCCESS;
