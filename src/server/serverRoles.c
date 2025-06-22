@@ -22,10 +22,9 @@ pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t heartbeat_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void send_heartbeat_to_replicas() {
-    ReplicaEvent event;
-    create_heartbeat_event(&event);
-    notify_replicas(&event);
-    free_event(&event);
+    ReplicaEvent event = create_heartbeat_event();
+    notify_replicas(event);
+    free_event(event);
     //fprintf(stderr, "Heartbeat to %d replicas!\n", notified_replicas);
 }
 
@@ -147,10 +146,9 @@ void *replica_listener_thread(void *arg) {
                 continue;
             }
 
-            ReplicaEvent event;
-            create_replica_added_event(&event , replica_id, cli_addr);
-            notify_replicas(&event);
-            free_event(&event);
+            ReplicaEvent event = create_replica_added_event(replica_id, cli_addr);
+            notify_replicas(event);
+            free_event(event);
 
         } else if (replica_connected < 0) {
             if (errno == EINTR) {
@@ -286,6 +284,7 @@ void *connect_to_server_thread(void *arg) {
                         }
                            
                             break;
+                        case EVENT_FILE_DELETED:
                         case EVENT_FILE_UPLOADED:{
                             UserContext *context = get_or_create_context(&contextTable, event.username);
                             pthread_mutex_lock(&context->lock);

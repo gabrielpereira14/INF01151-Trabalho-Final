@@ -8,7 +8,8 @@ uint32_t crc32(const char *filepath) {
     size_t bytesRead;
     FILE *file = fopen(filepath, "rb");
     if (!file) {
-        perror("Error opening file");
+        fprintf(stderr, "crc32: Error opening file '%s': ", filepath);
+        perror(NULL);
         return 0;
     }
 
@@ -51,7 +52,7 @@ int find_free_session_index(UserContext *context){
 
 int add_file_to_context(HashTable *table, const char *filename, char *username){
     UserContext *context = HashTable_search(table, username);
-    if (!context){
+    if (context == NULL) {
         return 1;
     }
 
@@ -59,6 +60,30 @@ int add_file_to_context(HashTable *table, const char *filename, char *username){
     return 0;
 }
 
+int remove_file_from_context(HashTable *table, const char *filename, char *username){
+    UserContext *context = HashTable_search(table, username);
+    if (!context){
+        return 1;
+    }
+
+    FileNode **prev = &(context->file_list);
+    FileNode *head = context->file_list;
+    while (head != NULL) {
+        if (strcmp(head->key, filename) == 0) {
+            *prev = head->next;
+
+            free(head->key);
+            free(head);
+
+            return 0;
+        }
+
+        prev = &(head->next);
+        head = head->next;
+    }
+
+    return 1;
+}
 
 Session *create_session(int index, UserContext *context, SessionSockets sockets, struct sockaddr_in device_address){
     Session *session = malloc(sizeof(Session));
@@ -93,12 +118,11 @@ int is_session_empty(Session *s) {
     return s == NULL;
 }
 
-void send_file_to_session(int send_to_index, UserContext *context, char *filepath){
+void send_file_to_session(int send_to_index, UserContext *context, char *filename, FileEntryType type){
     if(!is_session_empty(context->sessions[send_to_index])){
-        add_file_to_sync_buffer(context->sessions[send_to_index], filepath);
+        add_file_to_sync_buffer(context->sessions[send_to_index], filename, type);
     }
 }
-
 
 Session *get_user_session(UserContext *context, int session_index) {
     Session *session_to_return = NULL;

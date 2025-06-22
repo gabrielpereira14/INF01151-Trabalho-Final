@@ -48,11 +48,12 @@ typedef struct UserContext {
 UserContext *get_or_create_context(HashTable *table, char *username);
 int find_free_session_index(UserContext *context);
 int add_file_to_context(HashTable *table, const char *filename, char *username);
+int remove_file_from_context(HashTable *table, const char *filename, char *username);
 Session *create_session(int index, UserContext *context, SessionSockets sockets, struct sockaddr_in device_address);
 UserContext *create_context(char *username);
 int is_session_empty(Session *s);
 uint32_t crc32(const char *filepath);
-void send_file_to_session(int send_to_index, UserContext *context, char *filepath);
+void send_file_to_session(int send_to_index, UserContext *context, char *filename, FileEntryType type);
 Session *get_user_session(UserContext *context, int session_index);
 Session *get_user_session_by_address(UserContext *context, const struct sockaddr_in *target_address);
 

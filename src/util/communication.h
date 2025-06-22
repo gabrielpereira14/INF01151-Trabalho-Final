@@ -9,6 +9,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <linux/limits.h>
 
 #define FILE_CHUNK_SIZE 236
 
@@ -19,7 +20,15 @@ enum SendPacketErrors{
 };
 
 typedef enum PacketTypes{
-    PACKET_DATA, PACKET_SEND, PACKET_LIST, PACKET_DOWNLOAD, PACKET_DELETE, PACKET_EXIT, PACKET_REPLICA_MSG, PACKET_CONNECTION_CLOSED
+    PACKET_DATA,
+    PACKET_SEND,
+    PACKET_LIST,
+    PACKET_DOWNLOAD,
+    PACKET_DELETE,
+    PACKET_EXIT,
+    PACKET_REPLICA_MSG,
+    PACKET_CONNECTION_CLOSED,
+    PACKET_ERROR
 } PacketTypes;
 
 typedef struct packet{ 
@@ -48,8 +57,9 @@ Packet *create_packet(const PacketTypes type, const uint16_t lenght, const char 
 Packet *read_packet(int newsockfd);
 int send_packet(int sockfd, const Packet *packet);
 void write_packets_to_file(char *filename, uint64_t num_packets, int socket);
-void send_file(const int sockfd, char *filepath);
-char *read_file_from_socket(int socketfd, const char *path_to_save);
+void send_file(const int sockfd, char *filename, char *basepath);
+char *handle_send_delete(int socketfd, const char *path, PacketTypes *result);
 size_t get_file_size(FILE *file_ptr);
+char *create_filepath(const char *base_path, const char *filename);
 
 #endif

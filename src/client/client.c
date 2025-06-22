@@ -31,7 +31,7 @@ char sync_dir_path[PATH_MAX];
 int create_sync_dir(){
     if (mkdir(sync_dir_path, 0755) == -1) {
         if (errno != EEXIST) {
-            perror("mkdir() error");
+            perror("Error creating sync directory");
             return 1;
         }
     }
@@ -41,13 +41,13 @@ int create_sync_dir(){
 int copy_file(const char *source_path, const char *dest_path) {
     FILE *src = fopen(source_path, "rb");
     if (src == NULL) {
-        perror("Error opening source file");
+        perror("copy_file: Error opening source file");
         return 1;
     }
 
     FILE *dest = fopen(dest_path, "wb");
     if (dest == NULL) {
-        perror("Error opening destination file");
+        perror("copy_file: Error opening destination file");
         fclose(src);
         return 1;
     }
@@ -87,7 +87,6 @@ int upload(const char *source_path) {
         fprintf(stderr, "ERROR: Failed to construct destination path.\n");
         return 1;
     }
-    
 
     if (copy_file(source_path, dest_path) != 0) {
         fprintf(stderr,"ERROR: File copy failed.\n");
@@ -129,7 +128,7 @@ void list_server(int socketfd){
 void list_client() {
     DIR *dir = opendir(sync_dir_path);
     if (!dir) {
-        perror("ERROR opening sync_dir");
+        perror("list_client: ERROR opening sync_dir");
         return;
     }
 
@@ -167,23 +166,20 @@ void download(const char *filename, int socketfd) {
     //printf("Download do arquivo: %s\n", filename);
 
     // Envia o comando para sinalizar um download
-    Packet *command = create_packet(PACKET_DOWNLOAD, 0, NULL);
+    Packet *command = create_packet(PACKET_DOWNLOAD, strlen(filename), filename);
     if (send_packet(socketfd, command) != OK) {
         fprintf(stderr, "ERROR sending download command\n");
         return;
     }
     free(command);
 
-    // Envia o nome do arquivo requisitado
-    Packet *name = create_packet(PACKET_SEND, strlen(filename), filename); // TODO: não enviar o caracter nulo no final
-    if (send_packet(socketfd, name) != OK) {
-        fprintf(stderr, "ERROR sending file name\n");
+    // SAlva o arquivo no diretorio atual
+    PacketTypes result;
+    handle_send_delete(socketfd, ".", &result);
+    if (result != PACKET_SEND) {
+        fprintf(stderr, "Failed to download file %s\n", filename);
         return;
     }
-    free(name);
-
-    // SAlva o arquivo no diretorio atual
-    read_file_from_socket(socketfd, ".");
     printf("Arquivo '%s' salvo.\n", filename);
 }
 
@@ -191,20 +187,13 @@ void delete(const char *filename, int socketfd) {
     //printf("Exclusão do arquivo: %s\n", filename);
 
     // Envia o comando para sinalizar a exclusao
-    Packet *command = create_packet(PACKET_DELETE, 0, NULL);
-    if (send_packet(socketfd, command) != OK) {
+    Packet *command_packet = create_packet(PACKET_DELETE, strlen(filename), filename);
+    if (send_packet(socketfd, command_packet) != OK) {
         fprintf(stderr, "ERROR sending delete command\n");
         return;
     }
-    free(command);
 
-    // Envia o nome do arquivo a ser deletado
-    Packet *name = create_packet(PACKET_SEND, strlen(filename), filename); // TODO: não enviar o caracter nulo no final
-    if (send_packet(socketfd, name) != OK) {
-        fprintf(stderr, "ERROR sending file name\n");
-        return;
-    }
-    free(name);
+    free(command_packet);
 
     printf("Exclusão solicitada.\n");
 }
@@ -227,8 +216,7 @@ void *start_console_input_thread(void *arg){
 
     printf("Client started!\n");
 
-
-    while (strcmp(command, "exit") != 0) {
+    while (strcmp(command, "exit") != 0 && signal_shutdown == 0) {
         command[0] = '\0';
         path[0] = '\0';
 
@@ -238,29 +226,21 @@ void *start_console_input_thread(void *arg){
             close_client(socketfd);
             printf("Client closed\n");
             break;
-        }
-        else if (strcmp(command, "get_sync_dir") == 0){
+        } else if (strcmp(command, "get_sync_dir") == 0) {
             create_sync_dir();
-        }
-        else if (strcmp(command, "list_client") == 0){   
+        } else if (strcmp(command, "list_client") == 0) {
             list_client();
-        }
-        else if (strcmp(command, "list_server") == 0){
+        } else if (strcmp(command, "list_server") == 0) {
             list_server(socketfd);
-        }
-        else if (strcmp(command, "upload") == 0){
-            if (upload(path) != 0)
-            {
+        } else if (strcmp(command, "upload") == 0) {
+            if (upload(path) != 0) {
                 fprintf(stderr, "ERROR: Failed to upload file.");
             }
-        }
-        else if (strcmp(command, "delete") == 0){
+        } else if (strcmp(command, "delete") == 0) {
             delete(path, socketfd);
-        }
-        else if (strcmp(command, "download") == 0){
+        } else if (strcmp(command, "download") == 0) {
             download(path, socketfd);
-        }
-        else{
+        } else{
             printf("Unknown command: %s\n", command);
         }
       
@@ -272,9 +252,20 @@ void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
     while (signal_shutdown == 0) {
-		char *filepath = read_file_from_socket(socket, sync_dir_path);
-        fprintf(stderr,"File received! Filepath: %s\n", filepath);
-		free(filepath);
+        PacketTypes result;
+		char *filename = handle_send_delete(socket, sync_dir_path, &result);
+        if (result == PACKET_SEND) {
+            printf("File %s received\n", filename);
+        } else if (result == PACKET_DELETE) {
+            printf("File %s deleted\n", filename);
+        } else if (result == PACKET_CONNECTION_CLOSED) {
+            fprintf(stderr, "Connection closed\n");
+            free(filename);
+	        pthread_exit(NULL);
+        } else {
+            fprintf(stderr, "Failed to receive\n");
+        }
+		free(filename);
 	}
 	pthread_exit(NULL);
 }
@@ -287,19 +278,16 @@ void *start_directory_watcher_thread(void* arg) {
 
     fd = inotify_init1(IN_NONBLOCK);
     if (fd < 0) {
-        perror("inotify_init1");
+        perror("Error creating directory watcher fd");
         pthread_exit(NULL);
     }
 
     wd = -1;
 
-    do{
+    do {
         usleep(200);
-        wd = inotify_add_watch(fd, sync_dir_path, 
-            IN_CREATE 
-            | 
-            IN_CLOSE_WRITE);
-    }while(wd < 0);
+        wd = inotify_add_watch(fd, sync_dir_path, IN_CREATE | IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE | IN_MOVED_FROM);
+    } while(wd < 0);
   
 
     while (signal_shutdown == 0) {
@@ -310,7 +298,7 @@ void *start_directory_watcher_thread(void* arg) {
                 usleep(100000);
                 continue;
             } else {
-                perror("read");
+                perror("Error reading directory watcher event");
                 break;
             }
         }
@@ -319,14 +307,14 @@ void *start_directory_watcher_thread(void* arg) {
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
 
-            int path_size = strlen(sync_dir_path) + strlen(event->name) + 2;
-            char event_file_path[path_size];
-
-            snprintf(event_file_path, path_size, "%s/%s", sync_dir_path, event->name);
-
-            if (event->mask & IN_CLOSE_WRITE) {
+            if ((event->mask & (IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO)) != 0) {
                 sleep(1);
-                send_file(socket, event_file_path);
+                send_file(socket, event->name, sync_dir_path);
+            }
+
+            if ((event->mask & (IN_DELETE | IN_MOVED_FROM)) != 0) {
+                sleep(i);
+                delete(event->name, socket);
             }
 
             i += sizeof(struct inotify_event) + event->len;
@@ -338,9 +326,9 @@ void *start_directory_watcher_thread(void* arg) {
     pthread_exit(NULL);
 }
 
-int set_sync_dir_path(){
+int set_sync_dir_path() {
     if (getcwd(sync_dir_path, sizeof(sync_dir_path)) == NULL) {
-        perror("getcwd() error");
+        perror("Error getting current working directory");
         return 1;
     }
 
@@ -412,17 +400,13 @@ int main(int argc, char* argv[]){
     if(argc >= 3){
         strcpy(hostname,argv[2]);
     }
-    
 
     if(argc >= 4){
         console_socket_port = atoi(argv[3]);
     }
 
-
-
     uint16_t send_socket_port = console_socket_port + 1;
     uint16_t receive_socket_port = console_socket_port + 2;
-
 
     if(set_sync_dir_path() != 0){
         return EXIT_FAILURE;

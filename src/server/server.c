@@ -40,7 +40,8 @@ int create_folder_if_not_exists(const char *path, const char *folder_name) {
     }
 
     if (mkdir(full_path, 0755) != 0) {
-        perror("mkdir failed");
+		fprintf(stderr, "Error creating folder '%s': ", full_path);
+        perror(NULL);
         return -1;
     }
 
@@ -51,7 +52,7 @@ int create_folder_if_not_exists(const char *path, const char *folder_name) {
 void read_username(char *username, int sock_interface){
 	int request_size = read(sock_interface, username, MAX_USERNAME_LENGTH);
 	if (request_size < 0) 
-		perror_exit("ERRO lendo o pedido de coneccao do usuário: ");
+		perror_exit("ERRO lendo o pedido de coneccao do usuário");
 	username[request_size] = '\0';
 	fflush(stdout);
 }
@@ -75,10 +76,9 @@ void initialize_user_session_and_threads(struct sockaddr_in device_address, int 
 	if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
 	{
 
-		ReplicaEvent event;
-		create_client_connected_event(&event , username, device_address);
-		notify_replicas(&event);
-		free_event(&event);
+		ReplicaEvent event = create_client_connected_event(username, device_address);
+		notify_replicas(event);
+		free_event(event);
 
 
 		pthread_create(&user_session->threads.interface_thread, NULL, interface, user_session);
@@ -102,7 +102,7 @@ void handle_new_connection(int sock_interface){
 
 		// Comunica pra o cliente fazer a conecção
 		if (write(sock_interface, &ANSWER_OK, sizeof(ANSWER_OK)) != sizeof(ANSWER_OK))
-			perror_exit("ERRO respondendo para o cliente: ");
+			perror_exit("ERRO respondendo para o cliente");
 
 		// Cria os socket de transferência
 	    int sock_send, sock_receive;
@@ -113,11 +113,11 @@ void handle_new_connection(int sock_interface){
 		// Aceita as conecções
 		listen(sock_receive_listen,5);
 		if ((sock_receive = accept(sock_receive_listen, (struct sockaddr *) &cli_receive_addr, &cli_receive_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de receive: ");
+		    perror_exit("ERRO aceitando a coneccao de receive");
 
 		listen(sock_send_listen,5);
 		if ((sock_send = accept(sock_send_listen, (struct sockaddr *) &cli_send_addr, &cli_send_addr_len)) == -1) 
-		    perror_exit("ERRO aceitando a coneccao de send: ");
+		    perror_exit("ERRO aceitando a coneccao de send");
 		
 
 		initialize_user_session_and_threads(cli_send_addr, sock_interface, sock_receive, sock_send, username);
@@ -182,13 +182,13 @@ int main(int argc, char* argv[]) {
 
     // Cria os sockets de espera de conecção
 	if ((sock_interface_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        perror_exit("ERRO abrindo o socket de espera de coneccoes de interface: ");
+        perror_exit("ERRO abrindo o socket de espera de coneccoes de interface");
 
 	if ((sock_send_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        perror_exit("ERRO abrindo o socket de espera por coneccao de send: ");
+        perror_exit("ERRO abrindo o socket de espera por coneccao de send");
 		
 	if ((sock_receive_listen = socket(AF_INET, SOCK_STREAM, 0)) == -1) 
-        perror_exit("ERRO abrindo o socket de espera por coneccao de receive: ");
+        perror_exit("ERRO abrindo o socket de espera por coneccao de receive");
 
 
     // Faz bind nos ports
@@ -246,11 +246,11 @@ int main(int argc, char* argv[]) {
     bzero(&(send_serv_addr.sin_zero), 8);
 
 	if (bind(sock_receive_listen, (struct sockaddr *) &receive_serv_addr, sizeof(receive_serv_addr)) < 0) { 
-			perror_exit("ERRO vinulando o socket de espera da coneccao de receive: ");
+			perror_exit("ERRO vinulando o socket de espera da coneccao de receive");
 	}
 
 	if (bind(sock_send_listen, (struct sockaddr *) &send_serv_addr, sizeof(send_serv_addr)) < 0) { 
-		perror_exit("ERRO vinulando o socket de espera da coneccao de send: ");
+		perror_exit("ERRO vinulando o socket de espera da coneccao de send");
 	}
 	
 	// Começa a esperar pedidos de conecção
@@ -267,7 +267,7 @@ int main(int argc, char* argv[]) {
 
         clilen = sizeof(struct sockaddr_in);
 	    if ((sock_interface = accept(sock_interface_listen, (struct sockaddr *) &cli_addr, &clilen)) == -1) 
-		    perror_exit("ERRO ao aceitar coneccoes da interface: ");
+		    perror_exit("ERRO ao aceitar coneccoes da interface");
 
 		handle_new_connection(sock_interface);
 	}
@@ -275,17 +275,9 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-
 void perror_exit(const char *msg) {
 	perror(msg);
 	exit(EXIT_FAILURE);
-}
-
-int receive_command(int socketfd){
-	Packet *packet = read_packet(socketfd);
-	PacketTypes type = packet->type;
-	free(packet);
-	return type;
 }
 
 char *get_user_folder(const char *username){
@@ -293,7 +285,7 @@ char *get_user_folder(const char *username){
 
     char *path = malloc(len);
     if (path == NULL) {
-        perror("malloc");
+        perror("Error generating user files folder path");
         return NULL;
     }
 
@@ -306,14 +298,14 @@ char* list_files(const char *folder_path) {
     struct dirent *entry;
     DIR *dir = opendir(folder_path);
     if (dir == NULL) {
-        perror("opendir");
+        perror("Error opening directory for listing");
         return NULL;
     }
 
     size_t buffer_size = 4096;
     char *result = malloc(buffer_size);
     if (result == NULL) {
-        perror("malloc");
+        perror("Error allocating file list buffer");
         closedir(dir);
         return NULL;
     }
@@ -347,7 +339,7 @@ char* list_files(const char *folder_path) {
             }
             char *new_result = realloc(result, buffer_size);
             if (new_result == NULL) {
-                perror("realloc");
+                perror("Error reallocating file list result buffer");
                 free(result);
                 closedir(dir);
                 return NULL;
@@ -387,117 +379,111 @@ void *interface(void* arg) {
 
 	char *folder_path = get_user_folder(session->user_context->username);
 
-	while (session->active)
-	{
-		int command = receive_command(interface_socket);
+	while (session->active) {
+		Packet *command_packet = read_packet(interface_socket);
 
 		//fprintf(stderr, "Command: %d\n", command);
 
-		switch (command)
-		{
-		case PACKET_LIST:{
-			char *files = list_files(folder_path);
+		switch (command_packet->type) {
+			case PACKET_LIST: {
+				char *files = list_files(folder_path);
 
-			Packet *packet = create_packet(PACKET_DATA, strlen(files), files);
+				Packet *packet = create_packet(PACKET_DATA, strlen(files), files);
 
-			if(send_packet(interface_socket, packet) != OK){
-				fprintf(stderr, "ERROR responding to list_server");
-				free(folder_path);
+				if(send_packet(interface_socket, packet) != OK){
+					fprintf(stderr, "ERROR responding to list_server");
+					free(folder_path);
+					free(packet);
+				}
+
+				free(files);
 				free(packet);
+
+				break;
 			}
-			
-			free(files);
-			free(packet);
-			
-			break;
+			case PACKET_DOWNLOAD: {
+				//printf("DOWNLOAD requisitado\n");
+
+  	  			printf("Requested file: '%.*s'\n", command_packet->length, command_packet->payload);
+
+				char *filename = malloc(command_packet->length + 1);
+				memcpy(filename, command_packet->payload, command_packet->length);
+				filename[command_packet->length] = '\0';
+
+  	  			char *filepath = create_filepath(folder_path, filename);
+
+  	  			if (access(filepath, F_OK) != 0) {
+  	    	  		fprintf(stderr, "ERROR file not found: %s\n", filename);
+					Packet *error_packet = create_packet(PACKET_ERROR, 0, NULL);
+					send_packet(interface_socket, error_packet);
+					free(error_packet);
+  	    	  		break;
+  	  			}
+
+  	  			printf("Sending file: %s\n", filename);
+  	  			send_file(interface_socket, filename, folder_path);
+
+				free(filename);
+				free(filepath);
+  	  			break;
+			}
+			case PACKET_DELETE: {
+  	  			//printf("DELETE requisitado\n");
+
+				char *filename = malloc(command_packet->length + 1);
+				memcpy(filename, command_packet->payload, command_packet->length);
+				filename[command_packet->length] = '\0';
+
+  	  			char *filepath = create_filepath(folder_path, filename);
+
+  	  			if (access(filepath, F_OK) != 0) {
+  	    	  		fprintf(stderr, "ERROR file not found: %s\n", filepath);
+  	  			} else if (remove(filepath) == 0) {
+  	    	  		printf("Arquivo excluído: '%s'\n", filepath);
+  	  			} else {
+  	    	  		fprintf(stderr, "[Servidor] ERROR deleting file '%s': ", filepath);
+					perror(NULL);
+  	  			}
+
+  	  			break;
+			}
+			case PACKET_EXIT: {
+				//fprintf(stderr, "iniciando exit para a sessao %d\n",session->session_index);
+				session->active = 0;
+
+				signal_shutdown(session);
+
+				close(receive_socketfd);
+				//fprintf(stderr, "fechou a socket the receive\n");
+				close(interface_socket);
+				//fprintf(stderr, "fechou a socket the interface\n");
+				close(send_socketfd);
+				//fprintf(stderr, "fechou a socket the send\n");
+
+				//fprintf(stderr, "esperando thread: %lu\n", (unsigned long) session->threads.receive_thread);
+				pthread_join(session->threads.receive_thread, NULL); 
+				//fprintf(stderr, "receive_thread exited\n");
+				pthread_join(session->threads.send_thread, NULL); 
+				//fprintf(stderr, "send_thread exited\n");
+
+				pthread_mutex_lock(&session->user_context->lock);
+				session->user_context->sessions[session->session_index] = NULL;
+
+				ReplicaEvent event = create_client_disconnected_event(session->user_context->username, session->device_address);
+
+  	  			pthread_mutex_unlock(&session->user_context->lock);
+
+				notify_replicas(event);
+				free_event(event);
+				break;
+			}
+			default:
+				break;
 		}
 
-		case PACKET_DOWNLOAD: {
-			//printf("DOWNLOAD requisitado\n");
-
-    		Packet *packet = read_packet(interface_socket);
-    		if (packet->length == 0 /* || !packet->payload */) {
-        		fprintf(stderr, "ERROR invalid file name.\n");
-        		break;
-    		}
-
-    		printf("Requested file: '%.*s'\n", packet->length, packet->payload);
-
-
-    		char filepath[512];
-    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet->length, packet->payload);
-
-    		if (access(filepath, F_OK) != 0) {
-        		fprintf(stderr, "ERROR file not found: %s\n", filepath);
-        		break;
-    		}
-
-    		printf("Sending file: %s\n", filepath);
-    		send_file(interface_socket, filepath);
-
-    		break;
-		}
-
-		case PACKET_DELETE: {
-    		//printf("DELETE requisitado\n");
-			
-    		Packet *packet = read_packet(interface_socket);
-    		if (packet->length == 0 /* || !packet.payload */) {
-        		fprintf(stderr, "ERROR invalid file name\n");
-        		break;
-    		}
-
-    		char filepath[512];
-    		snprintf(filepath, sizeof(filepath), "%s/%.*s", folder_path, packet->length, packet->payload);
-
-    		if (access(filepath, F_OK) != 0) {
-        		fprintf(stderr, "ERROR file not found: %s\n", filepath);
-    		} else if (remove(filepath) == 0) {
-        		printf("Arquivo excluído: %s\n", filepath);
-    		} else {
-        		perror("[Servidor] ERROR deleting file");
-    		}
-
-    		break;
-		}
-
-		case PACKET_EXIT:{
-			//fprintf(stderr, "iniciando exit para a sessao %d\n",session->session_index);
-			session->active = 0;
-
-			signal_shutdown(session);
-			
-			close(receive_socketfd);
-			//fprintf(stderr, "fechou a socket the receive\n");
-			close(interface_socket);
-			//fprintf(stderr, "fechou a socket the interface\n");
-			close(send_socketfd);
-			//fprintf(stderr, "fechou a socket the send\n");
-
-			
-			//fprintf(stderr, "esperando thread: %lu\n", (unsigned long) session->threads.receive_thread);
-			pthread_join(session->threads.receive_thread, NULL); 
-			//fprintf(stderr, "receive_thread exited\n");
-			pthread_join(session->threads.send_thread, NULL); 
-			//fprintf(stderr, "send_thread exited\n");
-
-			pthread_mutex_lock(&session->user_context->lock);
-			session->user_context->sessions[session->session_index] = NULL;
-
-			ReplicaEvent event;
-			create_client_disconnected_event(&event, session->user_context->username, session->device_address);
-
-    		pthread_mutex_unlock(&session->user_context->lock);
-
-			notify_replicas(&event);
-			free_event(&event);
-			break;
-		}
-		
-		default:
-			break;
-		}
+		free(command_packet);
 	}
+
 	free(folder_path);
 
 	fprintf(stderr, "Sessao %d desconectada\n", session->session_index);
@@ -509,36 +495,48 @@ void *interface(void* arg) {
 void *send_f(void* arg) {
 	Session *session = (Session *) arg;
 	int send_socket = session->sockets.send_socketfd;
+	char *basepath = get_user_folder(session->user_context->username);
 
 	while (session->active)
 	{
 		FileEntry file_entry = get_next_file_to_sync(session);
-		if(!file_entry.valid){
+		if(file_entry.valid == 0){
 			continue;
 		}
-		send_file(send_socket, file_entry.filename);
+
+		switch (file_entry.type) {
+			case FILE_ENTRY_SEND:
+				send_file(send_socket, file_entry.filename, basepath);
+				break;
+			case FILE_ENTRY_DELETE:
+				Packet *delete_packet = create_packet(PACKET_DELETE, strlen(file_entry.filename), file_entry.filename);
+				send_packet(send_socket, delete_packet);
+			default:
+				break;
+		}
+
     	free_file_entry(file_entry); 
 	}
 		
 	pthread_exit(NULL);
 }
 
-int get_file_status(FileNode *list, const char *filepath) {
+int get_file_status(FileNode *list, const char *filename, const char *base_path) {
 	if (list == NULL){
 		return FILE_STATUS_NOT_FOUND;
 	}
 
-	FileNode *file_node = FileLinkedList_get(list, filepath);
+	FileNode *file_node = FileLinkedList_get(list, filename);
 
 	if (file_node == NULL){
 		return FILE_STATUS_NOT_FOUND;
 	}
 
+	char * filepath = create_filepath(base_path, filename);
 	uint32_t old_crc = file_node->crc;
     uint32_t new_crc = crc32(filepath);
 
-	if (new_crc != old_crc)
-	{
+	if (new_crc != old_crc) {
 		return FILE_STATUS_UPDATED;
 	}
 
@@ -547,47 +545,99 @@ int get_file_status(FileNode *list, const char *filepath) {
 
 void handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
-	char *filepath = read_file_from_socket(receive_socket, folder_path);
+
+	PacketTypes result;
+	char *filename = handle_send_delete(receive_socket, folder_path, &result);
+
+	if (result == PACKET_CONNECTION_CLOSED) {
+		fprintf(stderr, "ERROR in incoming file\n");
+		free(filename);
+		return;
+	}
+
+	char *filepath = create_filepath(folder_path, filename);
 	
 	if(session->active) {
-		fprintf(stderr, "File received from user %s session %i. Filepath: %s\n", session->user_context->username, session->session_index, filepath);
-		switch (get_file_status(session->user_context->file_list, filepath)) {
-			case FILE_STATUS_NOT_FOUND:
-				if (add_file_to_context(&contextTable,filepath,session->user_context->username) != 0){
-					fprintf(stderr, "ERROR adicionando arquivo ao contexto");
-				}
-
-				if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
-					for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
-						send_file_to_session(send_to_index, session->user_context, filepath);
-					}
-				}
-
+		char *action;
+		switch (result) {
+			case PACKET_SEND:
+				action = "received";
 				break;
-			case FILE_STATUS_UPDATED:
-				FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filepath);
-				file_node->crc = crc32(filepath);
-
-				if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
-					for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
-						send_file_to_session(send_to_index, session->user_context, filepath);
-					}
-				}
+			case PACKET_DELETE:
+				action = "deleted";
 				break;
+			default:
+				action = "uh-oh";
+		}
+		fprintf(stderr, "File %s from user %s session %i. Filename: %s\n", action, session->user_context->username, session->session_index, filename);
+
+		switch (result) {
+			case PACKET_SEND: {
+				switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
+					case FILE_STATUS_NOT_FOUND:
+						if (add_file_to_context(&contextTable, filename, session->user_context->username) != 0){
+							fprintf(stderr, "ERROR adicionando arquivo ao contexto");
+						}
+					
+						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
+								send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_SEND);
+							}
+						}
+					
+						break;
+					case FILE_STATUS_UPDATED: {
+						FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filename);
+						file_node->crc = crc32(filepath);
+					
+						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
+								send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_SEND);
+							}
+						}
+					}
+						break;
+				}
+			}
+			break;
+			case PACKET_DELETE: {
+				switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
+					case FILE_STATUS_NOT_FOUND:
+						break;
+					case FILE_STATUS_UPDATED:
+					case FILE_STATUS_EXISTS: 
+						if (remove_file_from_context(&contextTable,filename,session->user_context->username) != 0){
+							fprintf(stderr, "ERROR removendo arquivo do contexto");
+						}					
+						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
+								send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_DELETE);
+							}
+						}
+				}
+			}
+			break;
+			default:
+				fprintf(stderr, "ERRO unexpected result in handling incoming file: %i\n", result);
 		}
 
-		
 	}
 
-	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filepath != NULL){
+	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filename != NULL){
 		ReplicaEvent event;
-		create_file_upload_event(&event, session->user_context->username, session->device_address, filepath);
-		notify_replicas(&event);
-		free_event(&event);
-		
+		switch (result) {
+			case PACKET_SEND:
+				event = create_file_upload_event(session->user_context->username, session->device_address, filename);
+				break;
+			case PACKET_DELETE:
+				event = create_file_delete_event(session->user_context->username, session->device_address, filename);
+		}
+
+		notify_replicas(event);
+		free_event(event);
 	}
 
-	free(filepath);
+	free(filename);
 }
 
 // Recebe os arquivos do cliente

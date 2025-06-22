@@ -81,7 +81,7 @@ Packet *read_packet(int newsockfd) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "read: No data available (non-blocking).\n");
             } else {
-                perror("read error on header");
+                perror("Error reading packet header");
             }
             free(packet);
             return NULL;
@@ -106,7 +106,7 @@ Packet *read_packet(int newsockfd) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "read: No data available (non-blocking) during payload.\n");
             } else {
-                perror("read error on payload");
+                perror("Error reading packet payload");
             }
             free(packet);
             return NULL;
@@ -119,11 +119,11 @@ Packet *read_packet(int newsockfd) {
 }
 
 
-void write_packets_to_file(char *filename, uint64_t num_packets, int socket) {
-    FILE *file = fopen(filename, "w");
+void write_packets_to_file(char *filepath, uint64_t num_packets, int socket) {
+    FILE *file = fopen(filepath, "w");
     if (file == NULL) {
-        printf("Error opening file!\n");
-        printf("\n%s\n", filename);
+        fprintf(stderr, "write_packets_to_file: Error opening file '%s': ", filepath);
+        perror(NULL);
         return;
     }
 
@@ -135,7 +135,7 @@ void write_packets_to_file(char *filename, uint64_t num_packets, int socket) {
 
     fflush(file);  // important!
     if (fsync(fileno(file)) == -1) {
-        perror("fsync");
+        perror("write_packets_to_file: Error synchronizing file");
     }
     fclose(file);
 }
@@ -156,7 +156,7 @@ int send_packet(int sockfd, const Packet *packet){
         if (errno == EPIPE) {
             return SOCKET_CLOSED; 
         } else {
-            perror("send"); 
+            perror("Error sending packet"); 
             return -1;
         }
     }
@@ -177,29 +177,29 @@ char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
     return buffer;
 }
 
-void send_file(const int sockfd, char *filepath) {
+void send_file(const int sockfd, char *filename, char *basepath) {
+    char *filepath = create_filepath(basepath, filename);
     FILE *file_ptr = fopen(filepath, "rb");
     if(file_ptr == NULL) {
-        printf("Error opening file!");   
-        return;           
+        fprintf(stderr, "send_file: Error opening file '%s': ", filepath);
+        perror(NULL);
+        return;
     }
 
     size_t file_size = get_file_size(file_ptr);
 
     int total_packet_amount = file_size / FILE_CHUNK_SIZE + (file_size % FILE_CHUNK_SIZE ? 1 : 0);
 
-    char *file_name = basename(filepath); // TODO: modificar para manter diretórios
-
-    FileAnnoucement *announcement = (FileAnnoucement*)malloc(sizeof(FileAnnoucement) + strlen(file_name));
+    FileAnnoucement *announcement = (FileAnnoucement*)malloc(sizeof(FileAnnoucement) + strlen(filename));
     announcement->num_packets = total_packet_amount;
-    announcement->filename_length = strlen(file_name);
-    memcpy(announcement->filename, file_name, strlen(file_name));
+    announcement->filename_length = strlen(filename);
+    memcpy(announcement->filename, filename, strlen(filename));
 
-    Packet *announcement_packet = create_packet(PACKET_SEND, sizeof(FileAnnoucement) + strlen(file_name), (char*)announcement);
+    Packet *announcement_packet = create_packet(PACKET_SEND, sizeof(FileAnnoucement) + strlen(filename), (char*)announcement);
     FileAnnoucement *announcement_teste = (FileAnnoucement*)(announcement_packet->payload);
     
     if (send_packet(sockfd, announcement_packet) != OK) {
-        fprintf(stderr, "ERROR sending file announcement\n");
+        fprintf(stderr, "send_file: ERROR sending file announcement\n");
         fclose(file_ptr);
         return;
     }
@@ -216,7 +216,7 @@ void send_file(const int sockfd, char *filepath) {
         Packet *packet = create_packet(PACKET_DATA, bytes_read, chunk);
 
         if (send_packet(sockfd, packet) != OK) {
-            fprintf(stderr, "ERROR sending file data packet\n");
+            fprintf(stderr, "send_file: ERROR sending file data packet\n");
             free(chunk);
             break;
         }
@@ -230,25 +230,63 @@ void send_file(const int sockfd, char *filepath) {
     fclose(file_ptr);
 }
 
-char *read_file_from_socket(int socketfd, const char *path_to_save){
+char *handle_send_delete(int socketfd, const char *path, PacketTypes *result){
     Packet *packet = read_packet(socketfd);
-    if (packet->length == 0){
-        return NULL;
+    switch (packet->type) {
+        case PACKET_SEND: {
+            if (packet->length == 0){
+                *result = PACKET_CONNECTION_CLOSED;
+                return NULL;
+            }
+        
+            FileAnnoucement *announcement = (FileAnnoucement*)(packet->payload);
+
+            char *filename = malloc(announcement->filename_length + 1);
+            memcpy(filename, announcement->filename, announcement->filename_length);
+            filename[announcement->filename_length] = '\0';
+
+            char *filepath = create_filepath(path, filename);
+            write_packets_to_file(filepath, announcement->num_packets, socketfd);
+        
+            free(filepath);
+            free(packet);
+
+            *result = PACKET_SEND;
+            return filename;
+        }
+        case PACKET_DELETE: {
+            char *filename = malloc(packet->length + 1);
+            memcpy(filename, packet->payload, packet->length);
+            filename[packet->length] = '\0';
+
+            char *filepath = create_filepath(path, filename);
+
+            if (remove(filepath) != 0) {
+                fprintf(stderr, "Unable to delete file '%s': ", filepath);
+                perror(NULL);
+            }
+
+            free(filepath);
+            *result = PACKET_DELETE;
+            return filename;
+        }
+        default: {
+            *result = packet->type;
+            return NULL;
+        }
+
     }
 
-    FileAnnoucement *announcement = (FileAnnoucement*)(packet->payload);
-    
-    char *filename = malloc(announcement->filename_length + 1);
-    memcpy(filename, announcement->filename, announcement->filename_length);
-    filename[announcement->filename_length] = '\0';
-    
-    char *filepath = malloc(strlen(path_to_save) + 1 + strlen(filename) + 1);
-    sprintf(filepath, "%s/%s", path_to_save, filename); 
-    write_packets_to_file(filepath, announcement->num_packets, socketfd);
-
-    free(filename);
-    free(packet);
-    return filepath;
 }
 
+char *create_filepath(const char *base_path, const char *filename) {
+    size_t length = strlen(base_path) + 1 + strlen(filename) + 1;
+    if (length > PATH_MAX) {
+        fprintf(stderr, "Error path too long\n");
+        return NULL;
+    }
+    char *filepath = malloc(length);
+    snprintf(filepath, length, "%s/%s", base_path, filename);
 
+    return filepath;
+}

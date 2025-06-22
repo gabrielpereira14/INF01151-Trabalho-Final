@@ -13,7 +13,7 @@ pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER;
 pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
 
-void add_file_to_sync_buffer(Session *session, const char *filename) {
+void add_file_to_sync_buffer(Session *session, const char *filename, FileEntryType type) {
     FileSyncBuffer *buffer = &session->sync_buffer;
     pthread_mutex_lock(&buffer->lock);
     while (buffer->count == FILE_SYNC_BUFFER_SIZE)
@@ -22,6 +22,7 @@ void add_file_to_sync_buffer(Session *session, const char *filename) {
     FileEntry *entry = &buffer->buffer[buffer->end];
     entry->username = strdup(session->user_context->username);
     entry->filename = strdup(filename);
+    entry->type = type;
     entry->to_session_index = session->session_index;
     entry->valid = 1;
 

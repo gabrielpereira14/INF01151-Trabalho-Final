@@ -28,6 +28,7 @@ HashTable HashTable_create(size_t size);
 // Consome o buffer de key, um novo string deve ser alocado
 // para inserir
 UserContext *HashTable_insert(HashTable *table, char* key, UserContext *value);
+UserContext *HashTable_remove(HashTable *table, char* key);
 UserContext *HashTable_search(HashTable *table, char* key);
 void HashTable_print(HashTable *table);
 
