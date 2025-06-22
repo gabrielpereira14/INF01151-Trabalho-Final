@@ -147,3 +147,39 @@ Session *get_user_session_by_address(UserContext *context, const struct sockaddr
 
     return found_session;
 }
+
+void disconnect_all_users(HashTable *table){
+    if (!table) {
+        return;
+    }
+    for (size_t i = 0; i < table->size; i++) {
+        pthread_mutex_lock(&table->locks[i]);
+        LinkedList node = table->array[i];
+        if (!node) {
+            pthread_mutex_unlock(&table->locks[i]);
+            continue;
+        }
+        while (node) {
+            UserContext *context = node->value;
+
+            if (context != NULL)
+            {
+                pthread_mutex_lock(&context->lock);
+
+                for (size_t i = 0; i < MAX_SESSIONS; i++)
+                {
+                    if (context->sessions[i] != 0)
+                    {
+                        free(context->sessions[i]);
+                        context->sessions[i] = 0;
+                    }
+                }
+
+                pthread_mutex_unlock(&context->lock);
+            }
+            
+            node = node->next;
+        }
+        pthread_mutex_unlock(&table->locks[i]);
+    }
+}

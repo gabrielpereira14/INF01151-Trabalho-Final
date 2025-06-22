@@ -408,7 +408,8 @@ void *run_as_backup(void* arg) {
         sleep(1);
     }
     printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
-    
+
+    disconnect_all_users(&contextTable);
 
     if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
     {
