@@ -215,6 +215,8 @@ void close_client(int socketfd){
         fprintf(stderr, "ERROR sending control packet (close client)\n");
         return;
     }
+
+    close(socketfd);
 }
 
 void *start_console_input_thread(void *arg){
@@ -225,7 +227,7 @@ void *start_console_input_thread(void *arg){
     printf("Client started!\n");
 
 
-    while (strcmp(command, "exit") != 0)
+    while (strcmp(command, "exit") != 0 && !signal_shutdown)
     {
         command[0] = '\0';
         path[0] = '\0';
@@ -269,7 +271,7 @@ void *start_console_input_thread(void *arg){
 void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
-    while (signal_shutdown)
+    while (!signal_shutdown)
 	{
 		char *filepath = read_file_from_socket(socket, sync_dir_path);
         fprintf(stderr,"File received!\n");
@@ -526,14 +528,16 @@ int main(int argc, char* argv[]){
     }
 
 
-
+   
     uint16_t send_socket_port = console_socket_port + 1;
     uint16_t receive_socket_port = console_socket_port + 2;
-
 
     if(set_sync_dir_path() != 0){
         return EXIT_FAILURE;
     }
+
+
+
 
     struct hostent *server;
 	if ((server = gethostbyname(hostname)) == NULL) {
@@ -579,11 +583,15 @@ int main(int argc, char* argv[]){
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
     pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
-    pthread_create(&reconnection_thread, NULL, notification_listener, &args);
-
+    
     pthread_join(console_thread, NULL);
     pthread_join(file_watcher_thread, NULL);
     pthread_join(receive_files_thread, NULL);
+
+
+
+
+    pthread_create(&reconnection_thread, NULL, notification_listener, &args);
     pthread_join(reconnection_thread, NULL);
 
 	close(sock_interface);
