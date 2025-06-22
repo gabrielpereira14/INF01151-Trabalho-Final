@@ -483,18 +483,20 @@ void *notification_listener(void *vargp) {
         args->port = novo_port;
 
         // 6) resolve DNS (ou IP) e reconecta
-        struct hostent *srv = gethostbyname(args->host);
-        if (!srv) {
+        struct hostent *server = gethostbyname(args->host);
+        if (!server) {
             fprintf(stderr, "[notif] gethostbyname falhou p/ %s\n",
                     args->host);
             sleep(1);
             continue;
         }
-        if (connect_to_server(args->sockfd, srv, args->port, args->user) != 0) {
-            fprintf(stderr, "[notif] reconexão falhou, tentando de novo...\n");
-            sleep(1);
-            continue;
-        }
+
+	    sock_interface = args->sockfd;
+	    console_socket_port = args->port;
+	    username = args->user;
+	    start_server_connection();
+	    
+	    
         printf("[notif] reconectado com sucesso em %s:%d\n",
                args->host, args->port);
     }
@@ -502,6 +504,42 @@ void *notification_listener(void *vargp) {
     // nunca alcançado
     close(listen_fd);
     return NULL;
+}
+
+void start_server_connection(){
+	if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
+		exit(EXIT_FAILURE);
+	}
+	
+	int sock_send, sock_receive;
+	if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		fprintf(stderr, "ERRO abrindo o socket se send\n");
+		exit(EXIT_FAILURE);
+	}
+	if ((sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		fprintf(stderr, "ERRO abrindo o socket de receive\n");
+		exit(EXIT_FAILURE);
+	}
+
+	struct sockaddr_in send_serv_addr = setup_socket_address(server, send_socket_port);
+	struct sockaddr_in receive_serv_addr = setup_socket_address(server, receive_socket_port);
+	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
+		fprintf(stderr,"ERRO conectando ao servidor de receive\n");
+		exit(EXIT_FAILURE);
+	}
+	if (connect(sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
+		fprintf(stderr,"ERRO conectando ao servidor de send\n");
+		exit(EXIT_FAILURE);
+	}
+
+	pthread_t console_thread, file_watcher_thread, receive_files_thread;
+	pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
+	pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
+	pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
+
+	pthread_join(console_thread, NULL);
+	pthread_join(file_watcher_thread, NULL);
+	pthread_join(receive_files_thread, NULL);
 }
 
 int main(int argc, char* argv[]){ 
@@ -527,7 +565,6 @@ int main(int argc, char* argv[]){
         console_socket_port = atoi(argv[3]);
     }
 
-
    
     uint16_t send_socket_port = console_socket_port + 1;
     uint16_t receive_socket_port = console_socket_port + 2;
@@ -536,60 +573,25 @@ int main(int argc, char* argv[]){
         return EXIT_FAILURE;
     }
 
-
-
-
-    struct hostent *server;
-	if ((server = gethostbyname(hostname)) == NULL) {
-        fprintf(stderr,"ERRO servidor nao encontrado\n");
-        return 1;
-    }
-
-    int sock_interface;
-    if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
-        exit(EXIT_FAILURE);
-    }
-	
 	// preenche os argumentos pra thread de reconexão
-    ReconnArgs args = {
+	ReconnArgs args = {
 	.sockfd = &sock_interface,
         .port   = atoi(argv[2]),
-    };
-    strncpy(args.host, argv[1], sizeof(args.host)-1);
-    strncpy(args.user, argv[3], sizeof(args.user)-1);
-    
-    int sock_send, sock_receive;
-    if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        fprintf(stderr, "ERRO abrindo o socket se send\n");
-        exit(EXIT_FAILURE);
-    }
-    if ((sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        fprintf(stderr, "ERRO abrindo o socket de receive\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    struct sockaddr_in send_serv_addr = setup_socket_address(server, send_socket_port);
-    struct sockaddr_in receive_serv_addr = setup_socket_address(server, receive_socket_port);
-	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
-        fprintf(stderr,"ERRO conectando ao servidor de receive\n");
-        exit(EXIT_FAILURE);
-    }
-	if (connect(sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
-        fprintf(stderr,"ERRO conectando ao servidor de send\n");
-        exit(EXIT_FAILURE);
-    }
+	};
+	strncpy(args.host, argv[1], sizeof(args.host)-1);
+	strncpy(args.user, argv[3], sizeof(args.user)-1);
 
-    pthread_t console_thread, file_watcher_thread, receive_files_thread, reconnection_thread; 
-    pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
-    pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
-    pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
-    
-    pthread_join(console_thread, NULL);
-    pthread_join(file_watcher_thread, NULL);
-    pthread_join(receive_files_thread, NULL);
+	
+	struct hostent *server;
+	if ((server = gethostbyname(hostname)) == NULL) {
+		fprintf(stderr,"ERRO servidor nao encontrado\n");
+		return 1;
+	}
 
+	int sock_interface;
+	start_server_connection();
 
-
+	pthread_t reconnection_thread;
 
     pthread_create(&reconnection_thread, NULL, notification_listener, &args);
     pthread_join(reconnection_thread, NULL);
