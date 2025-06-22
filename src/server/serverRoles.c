@@ -1,6 +1,7 @@
 #include "./serverRoles.h"
 #include "./serverCommon.h"
 #include "replica.h"
+#include "election.h"
 #include <bits/pthreadtypes.h>
 #include <time.h>
 #include <stdatomic.h>
@@ -39,11 +40,6 @@ int is_manager_running() {
 
     if (time_diff > HEARTBEAT_TIMEOUT_SECONDS) 
         return 0;
-    return 1;
-}
-
-int run_election(int id) {
-    fprintf(stderr, "Running election.\n");
     return 1;
 }
 
@@ -279,7 +275,7 @@ void *connect_to_server_thread(void *arg) {
                             pthread_mutex_unlock(&context->lock);
                             fprintf(stderr, "Usuário %s desconectou.\n", event.username);
                         }
-                           
+                            
                             break;
                         case EVENT_FILE_UPLOADED:{
                             UserContext *context = get_or_create_context(&contextTable, event.username);
@@ -291,7 +287,7 @@ void *connect_to_server_thread(void *arg) {
                             free(user_folder_path);
                             break;
                         }
-                            
+                                
                         case EVENT_REPLICA_ADDED:{
                             int replica_id = event.username[0];
                             if (replica_id != id)
@@ -301,6 +297,51 @@ void *connect_to_server_thread(void *arg) {
                         case EVENT_HEARTBEAT:
                             heartbeat_received();
                             break;
+                        
+                        case EVENT_ELECTION: {
+                            int sender_id = atoi(event.username);
+                            fprintf(stderr, "[Servidor %d] Recebeu ELECTION de %d.\n", id, sender_id);
+                            if (sender_id < id) {
+                                ReplicaEvent answer_event;
+                                create_election_answer_event(&answer_event, id);
+                                send_event(&answer_event, socketfd);
+                                free_event(&answer_event);
+                                    
+                                // Inicia sua própria eleição em uma nova thread
+                                pthread_t election_thread;
+                                int* my_id_ptr = malloc(sizeof(int));
+                                *my_id_ptr = id;
+                                pthread_create(&election_thread, NULL, (void* (*)(void*))run_election, my_id_ptr);
+                                pthread_detach(election_thread);
+                            }
+                            break;
+                        }
+
+                        case EVENT_ELECTION_ANSWER: {
+                            int sender_id = atoi(event.username);
+                            fprintf(stderr, "[Servidor %d] Recebeu ANSWER de %d.\n", id, sender_id);
+                            set_election_answer_received(1);
+                            break;
+                        }
+
+                        case EVENT_COORDINATOR: {
+                            int leader_id = atoi(event.username);
+                            char leader_ip[INET_ADDRSTRLEN];
+                            inet_ntop(AF_INET, &(event.device_address.sin_addr), leader_ip, INET_ADDRSTRLEN);
+                            int leader_port = ntohs(event.device_address.sin_port);
+
+                            fprintf(stderr, "[Servidor %d] Anúncio recebido: Novo líder é %d em %s:%d.\n", id, leader_id, leader_ip, leader_port);
+
+                            pthread_mutex_lock(&mode_change_mutex);
+                            // Atualiza os dados de conexão para o novo líder
+                            strncpy(backup_args->hostname, leader_ip, sizeof(backup_args->hostname) - 1);
+                            backup_args->hostname[sizeof(backup_args->hostname) - 1] = '\0';
+                            backup_args->port = leader_port;
+                            pthread_mutex_unlock(&mode_change_mutex);
+
+                            close(socketfd);
+                            break;
+                        }
                         }
                         break;
                     }
@@ -369,6 +410,18 @@ void *run_as_backup(void* arg) {
 
     last_heartbeat = time(NULL);
 
+    ManagerArgs *listener_args = malloc(sizeof(ManagerArgs));
+    listener_args->id = backup_args->id;
+    listener_args->port = backup_args->my_base_port + 3;
+    
+    pthread_t listener_tid;
+    if (pthread_create(&listener_tid, NULL, replica_listener_thread, listener_args) != 0) {
+        perror("Backup failed to create replica listener thread");
+        exit(EXIT_FAILURE);
+    }
+    pthread_detach(listener_tid);
+    printf("[Servidor %d] Backup agora está escutando por conexões de réplicas na porta %d.\n", listener_args->id, listener_args->port);
+
     pthread_t manager_conn_tid;
 
     int rc = pthread_create(&manager_conn_tid, NULL, connect_to_server_thread, backup_args);
@@ -409,13 +462,29 @@ void *run_as_backup(void* arg) {
     }
     printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
 
-    disconnect_all_users(&contextTable);
+    disconnect_all_users(&contextTable);    
 
-    if (atomic_load(&global_server_mode) == BACKUP_MANAGER)
-    {
+    if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
         ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
-		args->id = backup_args->id;
-		args->port = backup_args->port + 1;
+        args->id = backup_args->id;
+        args->port = backup_args->my_base_port + 10;
+
+        struct sockaddr_in my_new_manager_address;
+        memset(&my_new_manager_address, 0, sizeof(my_new_manager_address));
+        my_new_manager_address.sin_family = AF_INET;
+        my_new_manager_address.sin_port = htons(args->port);
+
+        if (inet_pton(AF_INET, my_server_ip, &my_new_manager_address.sin_addr) <= 0) {
+            perror("inet_pton falhou ao construir o endereço do novo coordenador");
+        }
+
+        ReplicaEvent coord_event;
+        create_coordinator_event(&coord_event, args->id, my_new_manager_address);
+        notify_replicas(&coord_event);
+        free_event(&coord_event);
+
+        // notificar o cliente?
+        
         pthread_t manager_thread;
         pthread_create(&manager_thread, NULL, manage_replicas, (void *) args);
         pthread_detach(manager_thread);
