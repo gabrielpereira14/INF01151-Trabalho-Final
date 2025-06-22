@@ -228,6 +228,7 @@ void send_file(const int sockfd, char *filename, char *basepath) {
     }
 
     fclose(file_ptr);
+    free(filepath);
 }
 
 char *handle_send_delete(int socketfd, const char *path, PacketTypes *result){

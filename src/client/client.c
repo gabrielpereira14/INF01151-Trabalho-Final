@@ -177,7 +177,7 @@ void download(const char *filename, int socketfd) {
     PacketTypes result;
     handle_send_delete(socketfd, ".", &result);
     if (result != PACKET_SEND) {
-        fprintf(stderr, "Failed to download file %s\n", filename);
+        fprintf(stderr, "Failed to download file '%s'\n", filename);
         return;
     }
     printf("Arquivo '%s' salvo.\n", filename);
@@ -255,9 +255,9 @@ void *start_file_receiver_thread(void* arg) {
         PacketTypes result;
 		char *filename = handle_send_delete(socket, sync_dir_path, &result);
         if (result == PACKET_SEND) {
-            printf("File %s received\n", filename);
+            printf("File '%s' received\n", filename);
         } else if (result == PACKET_DELETE) {
-            printf("File %s deleted\n", filename);
+            printf("File '%s' deleted\n", filename);
         } else if (result == PACKET_CONNECTION_CLOSED) {
             fprintf(stderr, "Connection closed\n");
             free(filename);

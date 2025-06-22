@@ -50,13 +50,16 @@ int find_free_session_index(UserContext *context){
     return -1;
 }
 
-int add_file_to_context(HashTable *table, const char *filename, char *username){
+int add_file_to_context(HashTable *table, const char *filename, const char *base_path, char *username){
     UserContext *context = HashTable_search(table, username);
     if (context == NULL) {
         return 1;
     }
 
-    context->file_list = FileLinkedList_push(context->file_list, filename, crc32(filename));
+    char *filepath = create_filepath(base_path, filename);
+    context->file_list = FileLinkedList_push(context->file_list, filename, crc32(filepath));
+
+    free(filepath);
     return 0;
 }
 

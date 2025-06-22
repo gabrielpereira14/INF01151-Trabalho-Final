@@ -445,6 +445,7 @@ void *interface(void* arg) {
 					perror(NULL);
   	  			}
 
+				free(filepath);
   	  			break;
 			}
 			case PACKET_EXIT: {
@@ -532,9 +533,10 @@ int get_file_status(FileNode *list, const char *filename, const char *base_path)
 		return FILE_STATUS_NOT_FOUND;
 	}
 
-	char * filepath = create_filepath(base_path, filename);
+	char *filepath = create_filepath(base_path, filename);
 	uint32_t old_crc = file_node->crc;
     uint32_t new_crc = crc32(filepath);
+	free(filepath);
 
 	if (new_crc != old_crc) {
 		return FILE_STATUS_UPDATED;
@@ -574,30 +576,38 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 		switch (result) {
 			case PACKET_SEND: {
 				switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
-					case FILE_STATUS_NOT_FOUND:
-						if (add_file_to_context(&contextTable, filename, session->user_context->username) != 0){
+					case FILE_STATUS_NOT_FOUND: {
+						if (add_file_to_context(&contextTable, filename, folder_path, session->user_context->username) != 0){
 							fprintf(stderr, "ERROR adicionando arquivo ao contexto");
 						}
-					
+
 						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
 							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
-								send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_SEND);
+								if (send_to_index != session->session_index) {
+									printf("Sending file '%s' of user %s from session %i to session %i\n", filename, session->user_context->username, session->session_index, send_to_index);
+									send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_SEND);
+								}
 							}
 						}
-					
+					}
 						break;
 					case FILE_STATUS_UPDATED: {
 						FileNode *file_node = FileLinkedList_get(session->user_context->file_list, filename);
 						file_node->crc = crc32(filepath);
-					
+
 						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
 							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
-								send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_SEND);
+								if (send_to_index != session->session_index) {
+									printf("Sending file '%s' of user %s from session %i to session %i\n", filename, session->user_context->username, session->session_index, send_to_index);
+									send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_SEND);
+								}
 							}
 						}
 					}
 						break;
 				}
+
+				
 			}
 			break;
 			case PACKET_DELETE: {
@@ -611,7 +621,9 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 						}					
 						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
 							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
-								send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_DELETE);
+								if (send_to_index != session->session_index) {
+									send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_DELETE);
+								}
 							}
 						}
 				}
@@ -638,6 +650,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 	}
 
 	free(filename);
+	free(filepath);
 }
 
 // Recebe os arquivos do cliente
@@ -647,7 +660,7 @@ void *receive(void* arg) {
 
 	char *folder_path = get_user_folder(session->user_context->username);
 	while (session->active) {
-		handle_incoming_file(session,receive_socket,folder_path);
+		handle_incoming_file(session,receive_socket, folder_path);
 	}
 	
 	free(folder_path);

@@ -47,7 +47,7 @@ typedef struct UserContext {
 
 UserContext *get_or_create_context(HashTable *table, char *username);
 int find_free_session_index(UserContext *context);
-int add_file_to_context(HashTable *table, const char *filename, char *username);
+int add_file_to_context(HashTable *table, const char *filename, const char *base_path, char *username);
 int remove_file_from_context(HashTable *table, const char *filename, char *username);
 Session *create_session(int index, UserContext *context, SessionSockets sockets, struct sockaddr_in device_address);
 UserContext *create_context(char *username);
