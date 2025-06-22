@@ -22,7 +22,10 @@ enum EventTypes {
     EVENT_FILE_UPLOADED,
     EVENT_REPLICA_ADDED,
     EVENT_HEARTBEAT,
-    EVENT_FILE_DELETED
+    EVENT_FILE_DELETED,
+    EVENT_ELECTION,
+    EVENT_ELECTION_ANSWER,
+    EVENT_COORDINATOR
 };
 
 typedef struct replicaEvent {
@@ -50,5 +53,9 @@ char* serialize_replica_event(const ReplicaEvent event);
 ReplicaEvent deserialize_replica_event(const char *str);
 
 void free_event(ReplicaEvent event);
+
+ReplicaEvent *create_election_event(ReplicaEvent *event, int sender_id);
+ReplicaEvent *create_election_answer_event(ReplicaEvent *event, int sender_id);
+ReplicaEvent *create_coordinator_event(ReplicaEvent *event, int leader_id, struct sockaddr_in leader_address);
 
 #endif

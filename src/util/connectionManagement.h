@@ -56,5 +56,6 @@ uint32_t crc32(const char *filepath);
 void send_file_to_session(int send_to_index, UserContext *context, char *filename, FileEntryType type);
 Session *get_user_session(UserContext *context, int session_index);
 Session *get_user_session_by_address(UserContext *context, const struct sockaddr_in *target_address);
+void disconnect_all_users(HashTable *table);
 
 #endif
