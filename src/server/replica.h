@@ -35,6 +35,13 @@ typedef struct replicaEvent {
     char *filename;
 } ReplicaEvent;
 
+typedef struct ReplicaNode {
+    int id;
+    int socketfd;
+    struct sockaddr_in device_address;
+    struct ReplicaNode *next;
+} ReplicaNode;
+
 extern int  current_manager;
 
 int notify_replicas(ReplicaEvent event);
@@ -54,8 +61,8 @@ ReplicaEvent deserialize_replica_event(const char *str);
 
 void free_event(ReplicaEvent event);
 
-ReplicaEvent *create_election_event(ReplicaEvent *event, int sender_id);
-ReplicaEvent *create_election_answer_event(ReplicaEvent *event, int sender_id);
-ReplicaEvent *create_coordinator_event(ReplicaEvent *event, int leader_id, struct sockaddr_in leader_address);
+ReplicaEvent create_election_event(int sender_id);
+ReplicaEvent create_election_answer_event(int sender_id);
+ReplicaEvent create_coordinator_event(int leader_id, struct sockaddr_in leader_address);
 
 #endif

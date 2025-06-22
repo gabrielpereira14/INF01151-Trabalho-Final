@@ -5,13 +5,6 @@
 
 int current_manager = -1;
 
-typedef struct ReplicaNode {
-    int id;
-    int socketfd;
-    struct sockaddr_in device_address;
-    struct ReplicaNode *next;
-} ReplicaNode;
-
 static ReplicaNode *head = NULL;
 static pthread_mutex_t replica_list_mutex;
 
@@ -343,30 +336,33 @@ ReplicaEvent deserialize_replica_event(const char *str) {
     return event;
 }
 
-ReplicaEvent *create_election_event(ReplicaEvent *event, int sender_id) {
-    event->type = EVENT_ELECTION;
-    event->username = malloc(16);
-    sprintf(event->username, "%d", sender_id);
-    event->filepath = NULL;
-    memset(&event->device_address, 0, sizeof(event->device_address));
+ReplicaEvent create_election_event(int sender_id) {
+    ReplicaEvent event;
+    event.type = EVENT_ELECTION;
+    event.username = malloc(16);
+    sprintf(event.username, "%d", sender_id);
+    event.filename = NULL;
+    memset(&event.device_address, 0, sizeof(event.device_address));
     return event;
 }
 
-ReplicaEvent *create_election_answer_event(ReplicaEvent *event, int sender_id) {
-    event->type = EVENT_ELECTION_ANSWER;
-    event->username = malloc(16);
-    sprintf(event->username, "%d", sender_id);
-    event->filepath = NULL;
-    memset(&event->device_address, 0, sizeof(event->device_address));
+ReplicaEvent create_election_answer_event(int sender_id) {
+    ReplicaEvent event;
+    event.type = EVENT_ELECTION_ANSWER;
+    event.username = malloc(16);
+    sprintf(event.username, "%d", sender_id);
+    event.filename= NULL;
+    memset(&event.device_address, 0, sizeof(event.device_address));
     return event;
 }
 
-ReplicaEvent *create_coordinator_event(ReplicaEvent *event, int leader_id, struct sockaddr_in leader_address) {
-    event->type = EVENT_COORDINATOR;
-    event->username = malloc(16);
-    sprintf(event->username, "%d", leader_id);
-    event->device_address = leader_address;
-    event->filepath = NULL;
+ReplicaEvent create_coordinator_event(int leader_id, struct sockaddr_in leader_address) {
+    ReplicaEvent event;
+    event.type = EVENT_COORDINATOR;
+    event.username = malloc(16);
+    sprintf(event.username, "%d", leader_id);
+    event.device_address = leader_address;
+    event.filename = NULL;
     return event;
 }
 

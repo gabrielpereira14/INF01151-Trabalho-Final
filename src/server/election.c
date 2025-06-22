@@ -34,10 +34,9 @@ int run_election(int my_id) {
     for (ReplicaNode *node = current_replicas; node != NULL; node = node->next) {
         if (node->id > my_id) {
             fprintf(stderr, "[Servidor %d] Enviando ELECTION para %d\n", my_id, node->id);
-            ReplicaEvent event;
-            create_election_event(&event, my_id);
-            send_event(&event, node->socketfd);
-            free_event(&event);
+            ReplicaEvent event = create_election_event(my_id);
+            send_event(event, node->socketfd);
+            free_event(event);
             sent_to_higher_id = 1;
         }
     }
