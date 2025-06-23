@@ -1,4 +1,5 @@
 #include "./replica.h"
+#include "serverCommon.h"
 #include <stdio.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -8,10 +9,7 @@ int current_manager = -1;
 static ReplicaNode *head = NULL;
 static pthread_mutex_t replica_list_mutex;
 
-extern ReplicaNode *head; 
-extern pthread_mutex_t replica_list_mutex;
-
-static ReplicaNode *create_new_node(int socketfd, int id, struct sockaddr_in device_address) {
+static ReplicaNode *create_new_node(int socketfd, int id, int listener_port, struct sockaddr_in device_address) {
     ReplicaNode *new_node = (ReplicaNode *)malloc(sizeof(ReplicaNode));
     if (new_node == NULL) {
         perror("Failed to allocate memory for new ReplicaNode");
@@ -19,6 +17,7 @@ static ReplicaNode *create_new_node(int socketfd, int id, struct sockaddr_in dev
     }
     new_node->id = id;
     new_node->socketfd = socketfd;
+    new_node->listener_port = listener_port;
     new_node->device_address = device_address;
     new_node->next = NULL;
     return new_node;
@@ -44,7 +43,7 @@ void destroy_replica_list_mutex() {
     pthread_mutex_destroy(&replica_list_mutex);
 }
 
-int add_replica(int socketfd, int id, struct sockaddr_in device_address) {
+int add_replica(int socketfd, int id, int listener_port, struct sockaddr_in device_address) {
     pthread_mutex_lock(&replica_list_mutex);
     if (find_node(socketfd) != NULL) {
         fprintf(stderr, "Warning: Replica with socketfd %d already exists in the list.\n", socketfd);
@@ -52,7 +51,7 @@ int add_replica(int socketfd, int id, struct sockaddr_in device_address) {
         return 0;
     }
 
-    ReplicaNode *newNode = create_new_node(socketfd, id, device_address);
+    ReplicaNode *newNode = create_new_node(socketfd, id, listener_port ,device_address);
     if (newNode == NULL) {
         pthread_mutex_unlock(&replica_list_mutex); 
         return 0;
@@ -125,19 +124,32 @@ int send_event(ReplicaEvent event, int socketfd){
 
     switch (event.type) {
         case EVENT_FILE_UPLOADED:
-            send_file(socketfd, event.filename, get_user_folder(event.username));
+            send_file(socketfd, event.filepath, get_user_folder(event.username));
             break;
         case EVENT_FILE_DELETED: {
-            Packet *delete_packet = create_packet(PACKET_DELETE, strlen(event.filename), event.filename);
+            Packet *delete_packet = create_packet(PACKET_DELETE, strlen(event.filepath), event.filepath);
             send_packet(socketfd, delete_packet);
             free(delete_packet);
         }
         default:
+            break;
     }
         
     free(packet);
     free(serialized_event);
     return return_code;
+}
+
+void send_replicas_data_to_new_replica(int new_replica_sockfd){
+    ReplicaNode *current = head;
+
+     while (current != NULL) {
+        ReplicaEvent event = create_replica_added_event( current->id, current->listener_port, current->device_address);
+        int return_code = send_event(event, new_replica_sockfd);
+        free_event(event);
+        current = current->next;
+    }
+    pthread_mutex_unlock(&replica_list_mutex); 
 }
 
 int notify_replicas(ReplicaEvent event){
@@ -179,9 +191,9 @@ void free_event(ReplicaEvent event){
         event.username = NULL;
     }
 
-    if (event.filename != NULL) {
-        free(event.filename);
-        event.filename = NULL;
+    if (event.filepath != NULL) {
+        free(event.filepath);
+        event.filepath = NULL;
     }
 }
 
@@ -191,7 +203,7 @@ ReplicaEvent create_client_connected_event(char *username, struct sockaddr_in de
     event.type = EVENT_CLIENT_CONNECTED;
     event.username = strdup(username);
     event.device_address = device_address;
-    event.filename = NULL;
+    event.filepath = NULL;
 
     return event;
 }
@@ -201,21 +213,19 @@ ReplicaEvent create_client_disconnected_event(char *username, struct sockaddr_in
     event.type = EVENT_CLIENT_DISCONNECTED;
     event.username = strdup(username);
     event.device_address = device_address;
-    event.filename = NULL;
+    event.filepath = NULL;
 
     return event;
 }
 
-ReplicaEvent create_replica_added_event(int id, struct sockaddr_in device_address){
+ReplicaEvent create_replica_added_event(int id, int listener_port, struct sockaddr_in device_address){
     ReplicaEvent event;
     event.type = EVENT_REPLICA_ADDED;
-
-    event.username = malloc(sizeof(int) + 1);
-    event.username[0] = id;
-    event.username[1] = '\0';
-
+    int needed = snprintf(NULL, 0, "%d:%d", id, listener_port) + 1;
+    event.username = malloc(needed);
+    sprintf(event.username, "%d:%d", id, listener_port);
     event.device_address = device_address;
-    event.filename = NULL;
+    event.filepath = NULL;
 
     return event;
 }
@@ -225,7 +235,7 @@ ReplicaEvent create_file_upload_event(char *username, struct sockaddr_in device_
     event.type = EVENT_FILE_UPLOADED;
     event.username = strdup(username);
     event.device_address = device_address;
-    event.filename = strdup(filepath);
+    event.filepath = strdup(filepath);
 
     return event;
 }
@@ -235,7 +245,7 @@ ReplicaEvent create_file_delete_event(char *username, struct sockaddr_in device_
     event.type = EVENT_FILE_DELETED;
     event.username = strdup(username);
     event.device_address = device_address;
-    event.filename = strdup(filepath);
+    event.filepath = strdup(filepath);
 
     return event;
 }
@@ -244,7 +254,7 @@ ReplicaEvent create_heartbeat_event(){
     ReplicaEvent event;
     event.type = EVENT_HEARTBEAT;
     event.username = NULL;
-    event.filename = NULL;
+    event.filepath = NULL;
      
     struct sockaddr_in empty_struct = {0};
     event.device_address = empty_struct;
@@ -258,7 +268,7 @@ char* serialize_replica_event(const ReplicaEvent event) {
     int port = ntohs(event.device_address.sin_port);
 
     const char *username_str = (event.username != NULL) ? event.username : "";
-    const char *filepath_str = (event.filename != NULL) ? event.filename : "";
+    const char *filepath_str = (event.filepath != NULL) ? event.filepath : "";
 
     size_t needed = snprintf(NULL, 0, "%d|%s:%d|%s|%s",
                              event.type, ip, port, username_str, filepath_str);
@@ -284,7 +294,7 @@ ReplicaEvent deserialize_replica_event(const char *str) {
     // 1. Event type
     token = strtok_r(copy, "|", &saveptr);
     if (token) {
-        event.type = (enum EventTypes) atoi(token);
+        event.type = (enum ReplicaEventType) atoi(token);
     } else {
         free(copy);
         return event; 
@@ -324,48 +334,22 @@ ReplicaEvent deserialize_replica_event(const char *str) {
     token = strtok_r(NULL, "|", &saveptr);
     if (token) {
         if (strcmp(token, "") != 0) {
-            event.filename = strdup(token);
+            event.filepath = strdup(token);
         } else {
-            event.filename = NULL;
+            event.filepath = NULL;
         }
     } else {
-        event.filename = NULL;
+        event.filepath = NULL;
     }
 
     free(copy); 
     return event;
 }
 
-ReplicaEvent create_election_event(int sender_id) {
-    ReplicaEvent event;
-    event.type = EVENT_ELECTION;
-    event.username = malloc(16);
-    sprintf(event.username, "%d", sender_id);
-    event.filename = NULL;
-    memset(&event.device_address, 0, sizeof(event.device_address));
-    return event;
-}
-
-ReplicaEvent create_election_answer_event(int sender_id) {
-    ReplicaEvent event;
-    event.type = EVENT_ELECTION_ANSWER;
-    event.username = malloc(16);
-    sprintf(event.username, "%d", sender_id);
-    event.filename= NULL;
-    memset(&event.device_address, 0, sizeof(event.device_address));
-    return event;
-}
-
-ReplicaEvent create_coordinator_event(int leader_id, struct sockaddr_in leader_address) {
-    ReplicaEvent event;
-    event.type = EVENT_COORDINATOR;
-    event.username = malloc(16);
-    sprintf(event.username, "%d", leader_id);
-    event.device_address = leader_address;
-    event.filename = NULL;
-    return event;
-}
-
 ReplicaNode* get_replica_list_head() {
     return head;
+}
+
+pthread_mutex_t* get_replica_list_mutex() {
+    return &replica_list_mutex;
 }

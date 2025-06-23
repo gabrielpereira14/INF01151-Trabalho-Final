@@ -48,7 +48,7 @@ void print_packet(Packet* packet) {
 }
 
 Packet* create_packet(const PacketTypes type, const uint16_t lenght, const char *payload){
-    Packet *packet = (Packet*)malloc(sizeof(Packet) + lenght);
+    Packet *packet = (Packet*)calloc(1,sizeof(Packet) + lenght);
     packet->type = type;
     packet->length = lenght;
     if (lenght > 0) {

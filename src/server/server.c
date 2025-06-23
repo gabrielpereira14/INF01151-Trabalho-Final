@@ -1,6 +1,6 @@
 #include "./serverCommon.h"
-#include "./serverRoles.h"
 #include "replica.h"
+#include "serverRoles.h"
 #include <stdio.h>
 #include <linux/limits.h>
 
@@ -210,7 +210,7 @@ int main(int argc, char* argv[]) {
 	while (bind(sock_interface_listen, (struct sockaddr *) &interface_serv_addr, sizeof(interface_serv_addr)) < 0){
         interface_socket_port = (rand() % 30000) + 2000;
         interface_serv_addr.sin_port = htons(interface_socket_port);
-    } ;
+    };
 
 	fprintf(stderr, "Server running on port %d\n", interface_socket_port);
 	
@@ -223,6 +223,8 @@ int main(int argc, char* argv[]) {
 		ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
 		args->id = id;
 		args->port = replica_socket_port;
+		args->has_listener = 0;
+		args->socketfd = -1;
 
 		pthread_create(&replication_thread, NULL, manage_replicas, (void*) args);
 		pthread_detach(replication_thread);
@@ -232,7 +234,8 @@ int main(int argc, char* argv[]) {
 		strncpy(args->hostname, manager_ip, sizeof(args->hostname) - 1);
 		args->hostname[sizeof(args->hostname) - 1] = '\0';
 		args->port = manager_port;
-		args->my_base_port = interface_socket_port;
+		args->listener_port = -1;
+		args->has_listener = 0;
 
 		pthread_create(&replication_thread, NULL, run_as_backup, (void*) args);
 		pthread_detach(replication_thread);
@@ -515,9 +518,10 @@ void *send_f(void* arg) {
 			case FILE_ENTRY_SEND:
 				send_file(send_socket, file_entry.filename, basepath);
 				break;
-			case FILE_ENTRY_DELETE:
+			case FILE_ENTRY_DELETE:{
 				Packet *delete_packet = create_packet(PACKET_DELETE, strlen(file_entry.filename), file_entry.filename);
 				send_packet(send_socket, delete_packet);
+			}
 			default:
 				break;
 		}

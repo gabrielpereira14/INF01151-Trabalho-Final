@@ -15,12 +15,18 @@
 
 #define HEARTBEAT_TIMEOUT_SECONDS 5
 
+pthread_barrier_t barrier;
+
 atomic_int global_server_mode = UNKNOWN_MODE;
 atomic_int global_shutdown_flag = 0;
 time_t last_heartbeat;
 
 pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t heartbeat_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+atomic_int is_election_running = 0;
+atomic_int new_leader_decided = 0;
+int should_start_connection = 0;
 
 void send_heartbeat_to_replicas() {
     ReplicaEvent event = create_heartbeat_event();
@@ -40,7 +46,7 @@ int is_manager_running() {
     int time_diff = difftime(time(NULL), last_heartbeat);
     pthread_mutex_unlock(&heartbeat_mutex);
 
-    if (time_diff > HEARTBEAT_TIMEOUT_SECONDS) 
+    if (time_diff > HEARTBEAT_TIMEOUT_SECONDS || atomic_load(&new_leader_decided) || atomic_load(&is_election_running)) 
         return 0;
     return 1;
 }
@@ -66,85 +72,92 @@ int has_data(int socketfd, int timeout_ms) {
 
 
 void *replica_listener_thread(void *arg) {
-    ManagerArgs *manager_args = (ManagerArgs *)arg;
+    ManagerArgs *manager_args = (ManagerArgs *) arg;
     int port = manager_args->port;
 
-    int listen_sockfd, newsockfd;
-    struct sockaddr_in sockaddr, cli_addr;
+    int listen_sockfd = manager_args->socketfd;
+    int newsockfd;
+
+    struct sockaddr_in cli_addr;
     socklen_t clilen;
 
-    printf("[Manager Listener Thread] Starting on port %d.\n", port);
-
-    if ((listen_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("[Manager Listener Thread] ERROR opening socket");
-        free(manager_args);
-        pthread_exit(NULL);
-    }
-
-    sockaddr.sin_family = AF_INET;
-    sockaddr.sin_port = htons(port);
-    sockaddr.sin_addr.s_addr = INADDR_ANY;
-    bzero(&(sockaddr.sin_zero), 8); 
-
-
-    if (bind(listen_sockfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
-        perror("[Manager Listener Thread] ERROR on binding");
-        close(listen_sockfd);
-        free(manager_args);
-        pthread_exit(NULL);
-    }
-
     if (listen(listen_sockfd, 5) == -1) { 
-        perror("[Manager Listener Thread] ERROR on listen");
+        perror("[Listener Thread] ERROR on listen");
         close(listen_sockfd);
         free(manager_args);
         pthread_exit(NULL); 
     }
 
-    printf("[Manager Listener Thread] Listening for replica connections on port %d...\n", port);
+    printf("[Listener Thread] Listening for replica connections on port %d...\n", port);
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP_MANAGER);
+        int should_exit = atomic_load(&global_shutdown_flag);
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
-            printf("[Manager Listener Thread] Exiting loop due to mode change or global shutdown.\n");
+            printf("[Listener Thread] Exiting loop due global shutdown.\n");
             break; 
         }
         int replica_connected = has_data(listen_sockfd, 1000);
+        
         if ( replica_connected > 0){
-             clilen = sizeof(cli_addr);
+            clilen = sizeof(cli_addr);
             newsockfd = accept(listen_sockfd, (struct sockaddr *)&cli_addr, &clilen);
-
             if (newsockfd == -1) {
                 if (errno == EINTR) {
                     // Interrupted by a signal, retry accept
                     continue;
                 }
-                perror("[Manager Listener Thread] ERROR on accept");
+                perror("[Listener Thread] ERROR on accept");
                 break;
             }
 
-            Packet *packet = read_packet(newsockfd);
-            int replica_id = atoi(packet->payload);
-            free(packet);
+            
+            if ((atomic_load(&global_server_mode) == BACKUP_MANAGER))
+            {
+                Packet *packet = read_packet(newsockfd);
+                //print_packet(packet);
+                if (packet->type == PACKET_CONNECTION_CLOSED){
+                    continue;
+                }
 
-            char ip_str[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &(cli_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
-            fprintf(stderr, "[Manager Listener Thread] Accepted new replica connection from %s:%hu (fd %d) - Id %d\n",
-                   ip_str, ntohs(cli_addr.sin_port), newsockfd, replica_id);
+                int replica_id, replica_listener_port;
+                if (sscanf(packet->payload, "%d:%d", &replica_id, &replica_listener_port) != 2) {
+                    fprintf(stderr, "ERROR parsing ID and port");
+                }
 
+                fprintf(stderr,"Parsed ID = %d, Port = %d\n", replica_id, replica_listener_port);
 
+                char ip_str[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &(cli_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
+                fprintf(stderr, "[Listener Thread] Accepted new replica connection from %s:%hu (fd %d) - Id %d\n",
+                    ip_str, ntohs(cli_addr.sin_port), newsockfd, replica_id);
 
-            if(!add_replica(newsockfd, replica_id, cli_addr)){
-                fprintf(stderr, "[Manager Listener Thread] Error adding replica");
-                continue;
+                if(!add_replica(newsockfd, replica_id, replica_listener_port, cli_addr)){
+                    fprintf(stderr, "[Listener Thread] Error adding replica");
+                    continue;
+                }
+
+                ReplicaEvent event = create_replica_added_event(replica_id, replica_listener_port, cli_addr);
+                notify_replicas(event);
+                free_event(event);
+
+                send_replicas_data_to_new_replica(newsockfd);
+            }else if ((atomic_load(&global_server_mode) == BACKUP)){
+
+                // inicia a thread da eleicao (esccuta msg quem inicia eleicao é a do heartbeat)
+                pthread_t election_thread;
+
+                fprintf(stderr, "Replica conectada na thread de eleicao\n");
+                ElectionArgs *args = malloc(sizeof(ElectionArgs));
+                args->election_socket = newsockfd;
+                args->id = manager_args->id;
+
+                pthread_create(&election_thread, NULL, election_listener_thread, (void *) args);
+                pthread_detach(election_thread);
             }
-
-            ReplicaEvent event = create_replica_added_event(replica_id, cli_addr);
-            notify_replicas(event);
-            free_event(event);
+            
 
         } else if (replica_connected < 0) {
             if (errno == EINTR) {
@@ -161,13 +174,17 @@ void *replica_listener_thread(void *arg) {
     pthread_exit(NULL);
 }
 
+void process_election_result(int should_change_mode, int id){
+    
+}
+
 void *heartbeat_monitor_thread_main(void *arg) {
     int id = *(int*)arg;
     printf("[Backup Thread] Heartbeat monitor started for Backup ID %d.\n", id);
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
+        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) ;
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -181,12 +198,13 @@ void *heartbeat_monitor_thread_main(void *arg) {
             pthread_mutex_lock(&mode_change_mutex);
             if (atomic_load(&global_server_mode) == BACKUP) { 
                 printf("[Backup %d] Manager heartbeats stopped. Initiating failover.\n", id);
-                if (run_election(id)) { 
-                    atomic_store(&global_server_mode,BACKUP_MANAGER);
-                    printf("[Backup %d] Role changed to MANAGER.\n", id);
-                } else {
-                    printf("[Backup %d] Failed to win election. Remaining BACKUP.\n", id);
-                }
+                atomic_store(&is_election_running, 1);
+                // Inicia sua própria eleição em uma nova thread
+                pthread_t election_thread;
+                int* my_id_ptr = malloc(sizeof(int));
+                *my_id_ptr = id;
+                pthread_create(&election_thread, NULL, run_election, my_id_ptr);
+                pthread_join(election_thread, NULL);
             }
             pthread_mutex_unlock(&mode_change_mutex);
         }
@@ -203,14 +221,22 @@ void *connect_to_server_thread(void *arg) {
     const char *hostname = backup_args->hostname;
     int port = backup_args->port;
 
+    int has_connection_closed = 0; 
+
     
+    printf("BackupArgs Details:\n");
+    printf("  ID: %d\n", backup_args->id);
+    printf("  Hostname: %s\n", backup_args->hostname);
+    printf("  Port: %d\n", backup_args->port);
+    printf("  Has Listener: %s\n", backup_args->has_listener ? "Yes" : "No");
+    printf("  Listener Port: %d\n", backup_args->listener_port);
 
     int socketfd = -1;
     printf("[Backup %d Connection Thread] Attempting to connect to %s:%d.\n", id, hostname, port);
 
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
+        int should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || has_connection_closed;
         pthread_mutex_unlock(&mode_change_mutex);
 
         if (should_exit) {
@@ -220,8 +246,8 @@ void *connect_to_server_thread(void *arg) {
 
         struct hostent *server;
         if ((server = gethostbyname(hostname)) == NULL) {
-            fprintf(stderr,"ERRO servidor nao encontrado\n");
-            continue;
+            fprintf(stderr,"ERRO servidor nao encontrado hostname: %s\n", hostname);
+            exit(1);
         }
 
         if ((socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -245,15 +271,22 @@ void *connect_to_server_thread(void *arg) {
 
         printf("[Backup %d Connection Thread] Successfully connected to %s:%d (socket fd: %d).\n", id, hostname, port, socketfd);
 
-        char *id_string = malloc(2);
-        sprintf(id_string, "%d", id);
+        int listener_port = backup_args->listener_port;
+        int needed = snprintf(NULL, 0, "%d:%d", id, listener_port) + 1;
+        char *id_string = malloc(needed);
+        sprintf(id_string, "%d:%d", id, listener_port);
+
         Packet *packet = create_packet(PACKET_REPLICA_MSG, strlen(id_string), id_string);
         send_packet(socketfd, packet);
-        free(packet);
 
         while (1) {
+            if (atomic_load(&is_election_running))
+            {
+                continue;
+            }
+
             pthread_mutex_lock(&mode_change_mutex);
-            int comm_should_exit = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
+            int comm_should_exit = atomic_load(&global_shutdown_flag) || atomic_load(&global_server_mode) != BACKUP || has_connection_closed;
             pthread_mutex_unlock(&mode_change_mutex);
 
             if (comm_should_exit) {
@@ -263,6 +296,7 @@ void *connect_to_server_thread(void *arg) {
 
             if (has_data(socketfd, 1000) > 0) {
                 Packet *packet = read_packet(socketfd);
+                //print_packet(packet);
                 switch (packet->type) {
                     case PACKET_REPLICA_MSG:{
                         ReplicaEvent event = deserialize_replica_event(packet->payload);
@@ -293,64 +327,47 @@ void *connect_to_server_thread(void *arg) {
                         }
                                 
                         case EVENT_REPLICA_ADDED:{
-                            int replica_id = event.username[0];
-                            if (replica_id != id)
-                                add_replica(-1, replica_id, event.device_address);
+                            int replica_id, replica_listener_port;
+                            if (sscanf( event.username, "%d:%d", &replica_id, &replica_listener_port) != 2) {
+                                fprintf(stderr, "ERROR parsing replica_id and replica_listener_port");
+                                continue;
+                            }
+                            //fprintf(stderr,"Parsed ID = %d, Port = %d\n", replica_id, replica_listener_port);
+
+                            if (replica_id != id){
+
+                                event.device_address.sin_port = htons(replica_listener_port);
+
+                                char ip_str[INET_ADDRSTRLEN];
+                                inet_ntop(AF_INET, &(event.device_address.sin_addr), ip_str, INET_ADDRSTRLEN);
+                                int port = ntohs(event.device_address.sin_port);
+                                int new_replica_socketfd;
+                                printf("IP: %s, Port: %d\n", ip_str, port);
+
+                                if ((new_replica_socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+                                    perror("ERRO criando socket --------------------------------------------");
+                                    close(new_replica_socketfd);
+                                    continue;
+                                }
+
+                                if (connect(new_replica_socketfd, (struct sockaddr *) &event.device_address,sizeof(event.device_address)) < 0) {
+                                    perror("ERRO conectando ao servidor --------------------------------------------");
+                                    continue;
+                                }
+                                add_replica(new_replica_socketfd, replica_id, replica_listener_port, event.device_address);
+                            } 
+                                
                             break;
                         }
                         case EVENT_HEARTBEAT:
                             heartbeat_received();
                             break;
-                        
-                        case EVENT_ELECTION: {
-                            int sender_id = atoi(event.username);
-                            fprintf(stderr, "[Servidor %d] Recebeu ELECTION de %d.\n", id, sender_id);
-                            if (sender_id < id) {
-                                ReplicaEvent answer_event;
-                                create_election_answer_event(&answer_event, id);
-                                send_event(&answer_event, socketfd);
-                                free_event(&answer_event);
-                                    
-                                // Inicia sua própria eleição em uma nova thread
-                                pthread_t election_thread;
-                                int* my_id_ptr = malloc(sizeof(int));
-                                *my_id_ptr = id;
-                                pthread_create(&election_thread, NULL, (void* (*)(void*))run_election, my_id_ptr);
-                                pthread_detach(election_thread);
-                            }
-                            break;
-                        }
-
-                        case EVENT_ELECTION_ANSWER: {
-                            int sender_id = atoi(event.username);
-                            fprintf(stderr, "[Servidor %d] Recebeu ANSWER de %d.\n", id, sender_id);
-                            set_election_answer_received(1);
-                            break;
-                        }
-
-                        case EVENT_COORDINATOR: {
-                            int leader_id = atoi(event.username);
-                            char leader_ip[INET_ADDRSTRLEN];
-                            inet_ntop(AF_INET, &(event.device_address.sin_addr), leader_ip, INET_ADDRSTRLEN);
-                            int leader_port = ntohs(event.device_address.sin_port);
-
-                            fprintf(stderr, "[Servidor %d] Anúncio recebido: Novo líder é %d em %s:%d.\n", id, leader_id, leader_ip, leader_port);
-
-                            pthread_mutex_lock(&mode_change_mutex);
-                            // Atualiza os dados de conexão para o novo líder
-                            strncpy(backup_args->hostname, leader_ip, sizeof(backup_args->hostname) - 1);
-                            backup_args->hostname[sizeof(backup_args->hostname) - 1] = '\0';
-                            backup_args->port = leader_port;
-                            pthread_mutex_unlock(&mode_change_mutex);
-
-                            close(socketfd);
-                            break;
-                        }
                         }
                         break;
                     }
                     case PACKET_CONNECTION_CLOSED:{
                         fprintf(stderr, "[Backup %d Connection Thread] Connection closed.\n",id);
+                        has_connection_closed = 1;
                         break;
                     }
                         
@@ -372,21 +389,56 @@ void *connect_to_server_thread(void *arg) {
     pthread_exit(NULL);
 }
 
+void bind_listener_socket(ManagerArgs *manager_args){
+    struct sockaddr_in sockaddr, cli_addr;
+    socklen_t clilen;
+
+    int listen_sockfd;
+    int port = manager_args->port;
+
+    if ((listen_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("[Listener Thread] ERROR opening socket");
+        free(manager_args);
+        pthread_exit(NULL);
+    }
+
+    sockaddr.sin_family = AF_INET;
+    sockaddr.sin_port = htons(port);
+    sockaddr.sin_addr.s_addr = INADDR_ANY;
+    bzero(&(sockaddr.sin_zero), 8); 
+
+    while (bind(listen_sockfd, (struct sockaddr *) &sockaddr, sizeof(sockaddr)) < 0){
+        port = (rand() % 30000) + 2000;
+        sockaddr.sin_port = htons(port);
+    };
+
+    manager_args->port = port;
+    manager_args->socketfd = listen_sockfd;
+}
+
 void *manage_replicas(void *args) {
     ManagerArgs *manager_args = (ManagerArgs *) args;
     printf("Server ID %d: Running as MANAGER.\n", manager_args->id);
     atomic_store(&global_server_mode,BACKUP_MANAGER);
     last_heartbeat = time(NULL);
-    
-    pthread_t listener_tid;
 
-    int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, manager_args);
-    if (rc != 0) {
-        fprintf(stderr, "Error launching replica listener thread: %s\n", strerror(rc));
-        free(manager_args);
-        exit(EXIT_FAILURE);
+    if (atomic_load(&new_leader_decided))
+    {
+        atomic_store(&new_leader_decided,0);
     }
-    pthread_detach(listener_tid);
+    
+    if(!manager_args->has_listener){
+        manager_args->has_listener = 1;
+        bind_listener_socket(manager_args);
+        pthread_t listener_tid;
+        int rc = pthread_create(&listener_tid, NULL, replica_listener_thread, manager_args);
+        if (rc != 0) {
+            fprintf(stderr, "Error launching replica listener thread: %s\n", strerror(rc));
+            free(manager_args);
+            exit(EXIT_FAILURE);
+        }
+        pthread_detach(listener_tid);
+    }
 
     printf("Manager server (ID %d) is performing its main duties...\n", manager_args->id);
     while (1) {
@@ -397,7 +449,7 @@ void *manage_replicas(void *args) {
         if (should_exit_role) {
             printf("[Manager %d] Exiting MANAGER role loop.\n", manager_args->id);
             break;
-        }
+        } 
         send_heartbeat_to_replicas();
         sleep(2);
     }
@@ -412,52 +464,75 @@ void *run_as_backup(void* arg) {
     printf("Manager to connect to: %s:%d\n", backup_args->hostname, backup_args->port);
     atomic_store(&global_server_mode,BACKUP);
 
+
+
     last_heartbeat = time(NULL);
 
-    ManagerArgs *listener_args = malloc(sizeof(ManagerArgs));
-    listener_args->id = backup_args->id;
-    listener_args->port = backup_args->my_base_port + 3;
-    
-    pthread_t listener_tid;
-    if (pthread_create(&listener_tid, NULL, replica_listener_thread, listener_args) != 0) {
-        perror("Backup failed to create replica listener thread");
-        exit(EXIT_FAILURE);
+    if (!backup_args->has_listener)
+    {
+        ManagerArgs *listener_args = malloc(sizeof(ManagerArgs));
+        listener_args->id = backup_args->id;
+        listener_args->port = backup_args->port + 1;
+        listener_args->has_listener = 1;
+        listener_args->socketfd = -1;
+
+        bind_listener_socket(listener_args);
+
+        backup_args->listener_port = listener_args->port;
+
+        pthread_t listener_tid;
+        if (pthread_create(&listener_tid, NULL, replica_listener_thread, listener_args) != 0) {
+            perror("Backup failed to create replica listener thread");
+            exit(EXIT_FAILURE);
+        }
+        pthread_detach(listener_tid);
+        printf("[Servidor %d] Backup agora está escutando por conexões de réplicas na porta %d.\n", listener_args->id, listener_args->port);
+
+
     }
-    pthread_detach(listener_tid);
-    printf("[Servidor %d] Backup agora está escutando por conexões de réplicas na porta %d.\n", listener_args->id, listener_args->port);
+
+    printf("Backup server (ID %d) is performing its main duties...\n", backup_args->id);
+
+    printf("BackupArgs Details:\n");
+    printf("  ID: %d\n", backup_args->id);
+    printf("  Hostname: %s\n", backup_args->hostname);
+    printf("  Port: %d\n", backup_args->port);
+    printf("  Has Listener: %s\n", backup_args->has_listener ? "Yes" : "No");
+    printf("  Listener Port: %d\n", backup_args->listener_port);
 
     pthread_t manager_conn_tid;
-
     int rc = pthread_create(&manager_conn_tid, NULL, connect_to_server_thread, backup_args);
     if (rc != 0) {
         fprintf(stderr, "Error launching manager connection thread: %s\n", strerror(rc));
         exit(EXIT_FAILURE);
     }
-    pthread_detach(manager_conn_tid); // Detach the connection thread
+    pthread_detach(manager_conn_tid); 
 
-    // Launch heartbeat monitor thread (if not already running)
-    pthread_t heartbeat_tid;
-    int *backup_id_ptr = malloc(sizeof(int));
-    if (backup_id_ptr == NULL) {
-        perror("Failed to allocate ID for heartbeat thread");
-        exit(EXIT_FAILURE);
+    if (!backup_args->has_listener)
+    {
+        // Launch heartbeat monitor thread (if not already running)
+        pthread_t heartbeat_tid;
+        int *backup_id_ptr = malloc(sizeof(int));
+        if (backup_id_ptr == NULL) {
+            perror("Failed to allocate ID for heartbeat thread");
+            exit(EXIT_FAILURE);
+        }
+        *backup_id_ptr = backup_args->id;
+
+        int rc = pthread_create(&heartbeat_tid, NULL, heartbeat_monitor_thread_main, backup_id_ptr);
+        if (rc != 0) {
+            fprintf(stderr, "Error launching heartbeat monitor thread: %s\n", strerror(rc));
+            free(backup_id_ptr);
+            exit(EXIT_FAILURE);
+        }
+        pthread_detach(heartbeat_tid);
     }
-    *backup_id_ptr = backup_args->id;
-
-    rc = pthread_create(&heartbeat_tid, NULL, heartbeat_monitor_thread_main, backup_id_ptr);
-    if (rc != 0) {
-        fprintf(stderr, "Error launching heartbeat monitor thread: %s\n", strerror(rc));
-        free(backup_id_ptr);
-        exit(EXIT_FAILURE);
-    }
-    pthread_detach(heartbeat_tid);
-
-    printf("Backup server (ID %d) is performing its main duties...\n", backup_args->id);
+    atomic_store(&new_leader_decided, 0);
     while (1) {
         pthread_mutex_lock(&mode_change_mutex);
-        int should_exit_role = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP);
+        int should_exit_role = atomic_load(&global_shutdown_flag) || (atomic_load(&global_server_mode) != BACKUP) || atomic_load(&new_leader_decided);
         pthread_mutex_unlock(&mode_change_mutex);
-
+        
         if (should_exit_role) {
             printf("[Backup %d] Exiting BACKUP role loop.\n", backup_args->id);
             break;
@@ -467,28 +542,36 @@ void *run_as_backup(void* arg) {
     printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
 
     disconnect_all_users(&contextTable);    
+    
 
     if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+
+        fprintf(stderr, "Trocando de função \n");
+        
         ManagerArgs *args = (ManagerArgs *)malloc(sizeof(ManagerArgs));
         args->id = backup_args->id;
-        args->port = backup_args->my_base_port + 10;
+        args->port = backup_args->port;
+        args->has_listener = 1;
 
         struct sockaddr_in my_new_manager_address;
         memset(&my_new_manager_address, 0, sizeof(my_new_manager_address));
         my_new_manager_address.sin_family = AF_INET;
-        my_new_manager_address.sin_port = htons(args->port);
+        my_new_manager_address.sin_port = htons(backup_args->listener_port);
 
-        if (inet_pton(AF_INET, my_server_ip, &my_new_manager_address.sin_addr) <= 0) {
-            perror("inet_pton falhou ao construir o endereço do novo coordenador");
+        struct hostent *server;
+        if ((server = gethostbyname(backup_args->hostname)) == NULL) {
+            fprintf(stderr,"ERRO servidor nao encontrado\n");
         }
+        memcpy(&my_new_manager_address.sin_addr, server->h_addr, server->h_length);
 
-        ReplicaEvent coord_event;
-        create_coordinator_event(&coord_event, args->id, my_new_manager_address);
-        notify_replicas(&coord_event);
-        free_event(&coord_event);
+        //coordinator msg
+        send_coordinator_msg(args->id,my_new_manager_address);
 
         // notificar o cliente?
-        
+
+
+
+        replica_list_destroy();
         pthread_t manager_thread;
         pthread_create(&manager_thread, NULL, manage_replicas, (void *) args);
         pthread_detach(manager_thread);
