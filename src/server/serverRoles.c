@@ -174,10 +174,6 @@ void *replica_listener_thread(void *arg) {
     pthread_exit(NULL);
 }
 
-void process_election_result(int should_change_mode, int id){
-    
-}
-
 void *heartbeat_monitor_thread_main(void *arg) {
     int id = *(int*)arg;
     printf("[Backup Thread] Heartbeat monitor started for Backup ID %d.\n", id);
@@ -390,9 +386,7 @@ void *connect_to_server_thread(void *arg) {
 }
 
 void bind_listener_socket(ManagerArgs *manager_args){
-    struct sockaddr_in sockaddr, cli_addr;
-    socklen_t clilen;
-
+    struct sockaddr_in sockaddr;
     int listen_sockfd;
     int port = manager_args->port;
 
