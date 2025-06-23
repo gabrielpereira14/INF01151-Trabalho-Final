@@ -23,6 +23,8 @@
 #define MAX_INPUT_SIZE 128
 #define MAX_COMMAND 13
 #define MAX_ARGUMENT 115
+#define NOTIFICATION_PORT 12345
+#define BUFFER_SIZE 256
 
 int signal_shutdown = 0;
 
@@ -207,6 +209,8 @@ void close_client(int socketfd){
         return;
     }
     free(control_packet);
+
+    close(socketfd);
 }
 
 void *start_console_input_thread(void *arg){
@@ -216,7 +220,9 @@ void *start_console_input_thread(void *arg){
 
     printf("Client started!\n");
 
-    while (strcmp(command, "exit") != 0 && signal_shutdown == 0) {
+
+    while (strcmp(command, "exit") != 0 && !signal_shutdown)
+    {
         command[0] = '\0';
         path[0] = '\0';
 
@@ -383,6 +389,114 @@ int connect_to_server(int *sockfd, struct hostent *server, int port, char *usern
     return 0;
 }
 
+// Estrutura que carrega tudo para reconectar
+typedef struct {
+    int   *sockfd;               // ponteiro p/ o socket principal
+    char   host[NI_MAXHOST];     // hostname/IP atual
+    int    port;                 // porta atual
+    char   user[64];             // nome de usuário
+} ReconnArgs;
+
+/*
+ * notification_listener()
+ *
+ * 1) Abre um socket TCP em NOTIFICATION_PORT e faz bind/listen;
+ * 2) Em loop: aceita conexões de notificação, lê "novo_host:porta";
+ * 3) Fecha a conexão antiga ((args->sockfd)), atualiza host/port;
+ * 4) Chama connect_to_server(args->sockfd, ...) para reestabelecer.
+ */
+void *notification_listener(void *vargp) {
+    ReconnArgs       *args     = (ReconnArgs *)vargp;
+    int                listen_fd, notif_fd;
+    struct sockaddr_in addr;
+    socklen_t          addrlen = sizeof(addr);
+    char               buf[BUFFER_SIZE];
+
+    // 1) cria socket de escuta
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0) {
+        perror("notification_listener: socket");
+        pthread_exit(NULL);
+    }
+    // evita “Address already in use” em restart rápido
+    {
+        int opt = 1;
+        setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    }
+
+    // 2) bind em INADDR_ANY:NOTIFICATION_PORT
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port        = htons(NOTIFICATION_PORT);
+    if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("notification_listener: bind");
+        close(listen_fd);
+        pthread_exit(NULL);
+    }
+
+    if (listen(listen_fd, 5) < 0) {
+        perror("notification_listener: listen");
+        close(listen_fd);
+        pthread_exit(NULL);
+    }
+    printf("[notif] aguardando notificações na porta %d...\n", NOTIFICATION_PORT);
+
+    while (1) {
+        // 3) aceita conexão de notificação
+        notif_fd = accept(listen_fd, (struct sockaddr*)&addr, &addrlen);
+        if (notif_fd < 0) {
+            perror("notification_listener: accept");
+            continue;
+        }
+
+        // lê payload "host:port\n"
+        memset(buf, 0, sizeof(buf));
+        if (read(notif_fd, buf, sizeof(buf)-1) <= 0) {
+            perror("notification_listener: read");
+            close(notif_fd);
+            continue;
+        }
+        close(notif_fd);
+
+        // 4) parse “novo_host:novo_porta”
+        char novo_host[NI_MAXHOST];
+        int  novo_port;
+        if (sscanf(buf, "%63[^:]:%d", novo_host, &novo_port) != 2) {
+            fprintf(stderr, "[notif] payload inválido: %s\n", buf);
+            continue;
+        }
+        printf("[notif] recebido failover p/ %s:%d\n", novo_host, novo_port);
+
+        // 5) fecha conexão antiga
+        close(*(args->sockfd));
+
+        // atualiza dados
+        strncpy(args->host, novo_host, sizeof(args->host)-1);
+        args->port = novo_port;
+
+        // 6) resolve DNS (ou IP) e reconecta
+        struct hostent *srv = gethostbyname(args->host);
+        if (!srv) {
+            fprintf(stderr, "[notif] gethostbyname falhou p/ %s\n",
+                    args->host);
+            sleep(1);
+            continue;
+        }
+        if (connect_to_server(args->sockfd, srv, args->port, args->user) != 0) {
+            fprintf(stderr, "[notif] reconexão falhou, tentando de novo...\n");
+            sleep(1);
+            continue;
+        }
+        printf("[notif] reconectado com sucesso em %s:%d\n",
+               args->host, args->port);
+    }
+
+    // nunca alcançado
+    close(listen_fd);
+    return NULL;
+}
+
 int main(int argc, char* argv[]){ 
     char *username;
     char hostname[20];
@@ -412,6 +526,9 @@ int main(int argc, char* argv[]){
         return EXIT_FAILURE;
     }
 
+
+
+
     struct hostent *server;
 	if ((server = gethostbyname(hostname)) == NULL) {
         fprintf(stderr,"ERRO servidor nao encontrado\n");
@@ -422,6 +539,14 @@ int main(int argc, char* argv[]){
     if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
         exit(EXIT_FAILURE);
     }
+	
+	// preenche os argumentos pra thread de reconexão
+    ReconnArgs args = {
+	.sockfd = &sock_interface,
+        .port   = atoi(argv[2]),
+    };
+    strncpy(args.host, argv[1], sizeof(args.host)-1);
+    strncpy(args.user, argv[3], sizeof(args.user)-1);
     
     int sock_send, sock_receive;
     if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -444,14 +569,20 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
 
-    pthread_t console_thread, file_watcher_thread, receive_files_thread; 
+    pthread_t console_thread, file_watcher_thread, receive_files_thread, reconnection_thread; 
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
     pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
-
+    
     pthread_join(console_thread, NULL);
     pthread_join(file_watcher_thread, NULL);
     pthread_join(receive_files_thread, NULL);
+
+
+
+
+    pthread_create(&reconnection_thread, NULL, notification_listener, &args);
+    pthread_join(reconnection_thread, NULL);
 
 	close(sock_interface);
     return EXIT_SUCCESS;
