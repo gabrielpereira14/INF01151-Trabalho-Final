@@ -29,6 +29,12 @@ void print_packet(Packet* packet) {
         case PACKET_CONNECTION_CLOSED:
             type_name = "CLOSED";
             break;
+        case PACKET_RECONNECT:
+            type_name = "RECONNECT";
+            break;
+        case PACKET_ERROR:
+            type_name = "RECONNECT";
+            break;
     }
 
     printf("Packet - type: %s length: %i ",
@@ -230,6 +236,25 @@ void send_file(const int sockfd, char *filename, char *basepath) {
     fclose(file_ptr);
     free(filepath);
 }
+
+int has_data(int socketfd, int timeout_ms) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(socketfd, &read_fds);
+
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int result = select(socketfd + 1, &read_fds, NULL, NULL, &timeout);
+    if (result < 0) {
+        perror("select failed");
+        return -1;
+    }
+
+    return result; 
+}
+
 
 char *handle_send_delete(int socketfd, const char *path, PacketTypes *result){
     Packet *packet = read_packet(socketfd);

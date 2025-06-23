@@ -12,7 +12,7 @@
 #include <linux/limits.h>
 
 #define FILE_CHUNK_SIZE 236
-
+#define NOTIFICATION_PORT 12345
 #define MAX_SESSIONS 2
 
 enum SendPacketErrors{
@@ -28,7 +28,8 @@ typedef enum PacketTypes{
     PACKET_EXIT,
     PACKET_REPLICA_MSG,
     PACKET_CONNECTION_CLOSED,
-    PACKET_ERROR
+    PACKET_ERROR,
+    PACKET_RECONNECT
 } PacketTypes;
 
 typedef struct packet{ 
@@ -61,5 +62,6 @@ void send_file(const int sockfd, char *filename, char *basepath);
 char *handle_send_delete(int socketfd, const char *path, PacketTypes *result);
 size_t get_file_size(FILE *file_ptr);
 char *create_filepath(const char *base_path, const char *filename);
+int has_data(int socketfd, int timeout_ms);
 
 #endif

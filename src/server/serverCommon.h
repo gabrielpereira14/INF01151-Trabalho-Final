@@ -51,7 +51,7 @@ typedef struct {
     char hostname[256];
     int port;
     int has_listener; 
-    int listener_port;       
+    int listener_port;   
 } BackupArgs;
 
 typedef struct { 
@@ -72,6 +72,8 @@ typedef struct {
 extern HashTable contextTable;
 extern char my_server_ip[256];
 
+extern uint16_t interface_socket_port;
+
 enum ServerMode{ UNKNOWN_MODE, BACKUP, BACKUP_MANAGER };
 
 extern atomic_int global_server_mode;
@@ -85,6 +87,5 @@ void *run_as_backup(void *arg);
 void initialize_user_session_and_threads(struct sockaddr_in device_address, int sock_interface, int sock_receive, int sock_send, char *username);
 void handle_incoming_file(Session *session, int receive_socket, const char *folder_path);
 char *get_user_folder(const char *username);
-int has_data(int socketfd, int timeout_ms);
 
 #endif 

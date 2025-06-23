@@ -1,6 +1,9 @@
 #include "./connectionManagement.h"
 #include "./contextHashTable.h"
+#include "communication.h"
+#include <arpa/inet.h>
 #include <netinet/in.h>
+#include <stdio.h>
 
 uint32_t crc32(const char *filepath) {
     uint8_t buffer[1024];
@@ -199,6 +202,59 @@ void disconnect_all_users(HashTable *table){
                     {
                         free(context->sessions[i]);
                         context->sessions[i] = 0;
+                    }
+                }
+
+                pthread_mutex_unlock(&context->lock);
+            }
+            
+            node = node->next;
+        }
+        pthread_mutex_unlock(&table->locks[i]);
+    }
+}
+
+void send_packet_all_users(HashTable *table, const Packet *packet){
+    if (!table) {
+        return;
+    }
+    for (size_t i = 0; i < table->size; i++) {
+        pthread_mutex_lock(&table->locks[i]);
+        LinkedList node = table->array[i];
+        if (!node) {
+            pthread_mutex_unlock(&table->locks[i]);
+            continue;
+        }
+        while (node) {
+            UserContext *context = node->value;
+
+            if (context != NULL)
+            {
+                pthread_mutex_lock(&context->lock);
+
+                for (size_t i = 0; i < MAX_SESSIONS; i++)
+                {
+                    if (context->sessions[i] != 0)
+                    {
+                        struct sockaddr_in client_address =  context->sessions[i]->device_address;
+                        client_address.sin_port = htons(NOTIFICATION_PORT);
+                        char ip_str[INET_ADDRSTRLEN];
+                        inet_ntop(AF_INET, &(client_address.sin_addr), ip_str, INET_ADDRSTRLEN);
+                        int port = ntohs(client_address.sin_port);
+                        int notification_socketfd;
+
+                        if ((notification_socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+                            perror("ERRO criando socket --------------------------------------------");
+                            close(notification_socketfd);
+                            continue;
+                        }
+
+                        if (connect(notification_socketfd, (struct sockaddr *) &client_address,sizeof(client_address)) < 0) {
+                            perror("ERRO conectando ao servidor --------------------------------------------");
+                            continue;
+                        }
+                        send_packet(notification_socketfd, packet);
+                        fprintf(stderr, "Reconnect enviado pra user em %s:%d\n", ip_str,port);
                     }
                 }
 

@@ -1,3 +1,4 @@
+#include <netinet/in.h>
 #define _DEFAULT_SOURCE // Concerta o aviso chato sobre o h_addr do hostent
 #include "./serverRoles.h"
 #include "./serverCommon.h"
@@ -50,26 +51,6 @@ int is_manager_running() {
         return 0;
     return 1;
 }
-
-
-int has_data(int socketfd, int timeout_ms) {
-    fd_set read_fds;
-    FD_ZERO(&read_fds);
-    FD_SET(socketfd, &read_fds);
-
-    struct timeval timeout;
-    timeout.tv_sec = timeout_ms / 1000;
-    timeout.tv_usec = (timeout_ms % 1000) * 1000;
-
-    int result = select(socketfd + 1, &read_fds, NULL, NULL, &timeout);
-    if (result < 0) {
-        perror("select failed");
-        return -1;
-    }
-
-    return result; 
-}
-
 
 void *replica_listener_thread(void *arg) {
     ManagerArgs *manager_args = (ManagerArgs *) arg;
@@ -341,13 +322,13 @@ void *connect_to_server_thread(void *arg) {
                                 printf("IP: %s, Port: %d\n", ip_str, port);
 
                                 if ((new_replica_socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-                                    perror("ERRO criando socket --------------------------------------------");
+                                    perror("ERRO criando socket");
                                     close(new_replica_socketfd);
                                     continue;
                                 }
 
                                 if (connect(new_replica_socketfd, (struct sockaddr *) &event.device_address,sizeof(event.device_address)) < 0) {
-                                    perror("ERRO conectando ao servidor --------------------------------------------");
+                                    perror("ERRO conectando ao servidor");
                                     continue;
                                 }
                                 add_replica(new_replica_socketfd, replica_id, replica_listener_port, event.device_address);
@@ -451,6 +432,25 @@ void *manage_replicas(void *args) {
     pthread_exit(NULL);
 }
 
+void notify_clients_of_server_change(struct sockaddr_in new_address){
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &new_address.sin_addr, ip, INET_ADDRSTRLEN);
+    int port = ntohs(new_address.sin_port);
+
+    size_t needed = snprintf(NULL, 0, "%s:%d", ip, port) + 1;
+
+    char *result = malloc(needed);
+    if (!result){
+        fprintf(stderr, "ERROR enviando notificação pro cliente\n");
+        return;
+    }
+
+    sprintf(result, "%s:%d", ip, port);
+
+    Packet *packet = create_packet(PACKET_RECONNECT, needed, result);
+    send_packet_all_users(&contextTable, packet);
+}
+
 void *run_as_backup(void* arg) {
     BackupArgs *backup_args = (BackupArgs *) arg;
 
@@ -534,9 +534,7 @@ void *run_as_backup(void* arg) {
         sleep(1);
     }
     printf("Backup server (ID %d) is cleaning up resources.\n", backup_args->id);
-
-    disconnect_all_users(&contextTable);    
-    
+    int users_disconnected = 0;
 
     if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
 
@@ -561,14 +559,25 @@ void *run_as_backup(void* arg) {
         //coordinator msg
         send_coordinator_msg(args->id,my_new_manager_address);
 
-        // notificar o cliente?
+        // notificar o cliente
 
+        struct sockaddr_in new_address = my_new_manager_address;
+        new_address.sin_port = htons(interface_socket_port);
+    
+        notify_clients_of_server_change(new_address);
 
+        disconnect_all_users(&contextTable); 
+        users_disconnected = 1;   
 
         replica_list_destroy();
         pthread_t manager_thread;
         pthread_create(&manager_thread, NULL, manage_replicas, (void *) args);
         pthread_detach(manager_thread);
+    }
+
+    if (!users_disconnected)
+    {
+        disconnect_all_users(&contextTable); 
     }
 
     free(backup_args);

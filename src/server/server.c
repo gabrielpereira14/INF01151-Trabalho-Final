@@ -172,6 +172,7 @@ void parse_server_arguments(int argc, char *argv[]) {
     }
 }
 
+uint16_t interface_socket_port = 4000;
 
 int main(int argc, char* argv[]) {
 	parse_server_arguments(argc, argv);
@@ -198,8 +199,6 @@ int main(int argc, char* argv[]) {
 
     // Faz bind nos ports
 	struct sockaddr_in interface_serv_addr, send_serv_addr, receive_serv_addr;
-
-	uint16_t interface_socket_port = 4000;
 
     interface_serv_addr.sin_family = AF_INET;
 	interface_serv_addr.sin_port = htons(interface_socket_port);
@@ -653,6 +652,8 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 				break;
 			case PACKET_DELETE:
 				event = create_file_delete_event(session->user_context->username, session->device_address, filename);
+			default:
+				break;
 		}
 
 		notify_replicas(event);
