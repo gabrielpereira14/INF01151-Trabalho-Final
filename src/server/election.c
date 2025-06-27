@@ -270,6 +270,7 @@ void *election_listener_thread(void *arg){
                 args->hostname[sizeof(args->hostname) - 1] = '\0';
                 args->port = leader_port;
                 args->has_listener = 1;
+                args->listener_port = -1;
 
                 
                 pthread_create(&new_backup_thread, NULL, run_as_backup, (void*) args);
