@@ -85,7 +85,7 @@ extern pthread_mutex_t mode_change_mutex;
 void *manage_replicas(void *args);
 void *run_as_backup(void *arg);
 void initialize_user_session_and_threads(struct sockaddr_in device_address, int sock_interface, int sock_receive, int sock_send, char *username);
-void handle_incoming_file(Session *session, int receive_socket, const char *folder_path);
+int handle_incoming_file(Session *session, int receive_socket, const char *folder_path);
 char *get_user_folder(const char *username);
 
 #endif 

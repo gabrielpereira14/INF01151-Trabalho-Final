@@ -457,7 +457,7 @@ void *interface(void* arg) {
   	  			break;
 			}
 			case PACKET_EXIT: {
-				//fprintf(stderr, "iniciando exit para a sessao %d\n",session->session_index);
+				fprintf(stderr, "iniciando exit para a sessao %d\n",session->session_index);
 				session->active = 0;
 
 				signal_shutdown(session);
@@ -469,11 +469,11 @@ void *interface(void* arg) {
 				close(send_socketfd);
 				//fprintf(stderr, "fechou a socket the send\n");
 
-				//fprintf(stderr, "esperando thread: %lu\n", (unsigned long) session->threads.receive_thread);
+				fprintf(stderr, "esperando thread: %lu\n", (unsigned long) session->threads.receive_thread);
 				pthread_join(session->threads.receive_thread, NULL); 
-				//fprintf(stderr, "receive_thread exited\n");
+				fprintf(stderr, "receive_thread exited\n");
 				pthread_join(session->threads.send_thread, NULL); 
-				//fprintf(stderr, "send_thread exited\n");
+				fprintf(stderr, "send_thread exited\n");
 
 				pthread_mutex_lock(&session->user_context->lock);
 				session->user_context->sessions[session->session_index] = NULL;
@@ -554,7 +554,7 @@ int get_file_status(FileNode *list, const char *filename, const char *base_path)
     return FILE_STATUS_EXISTS;
 }
 
-void handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
+int handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
 
 	PacketTypes result;
@@ -563,7 +563,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 	if (result == PACKET_CONNECTION_CLOSED) {
 		fprintf(stderr, "ERROR in incoming file\n");
 		free(filename);
-		return;
+		return 0;
 	}
 
 	char *filepath = create_filepath(folder_path, filename);
@@ -580,8 +580,6 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 			default:
 				action = "uh-oh";
 		}
-		fprintf(stderr, "File %s from user %s session %i. Filename: %s\n", action, session->user_context->username, session->session_index, filename);
-
 		switch (result) {
 			case PACKET_SEND: {
 				switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
@@ -642,6 +640,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 				fprintf(stderr, "ERRO unexpected result in handling incoming file: %i\n", result);
 		}
 
+		fprintf(stderr, "File %s from user %s session %i. Filename: %s\n", action, session->user_context->username, session->session_index, filename);
 	}
 
 	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filename != NULL){
@@ -662,6 +661,7 @@ void handle_incoming_file(Session *session, int receive_socket, const char *fold
 
 	free(filename);
 	free(filepath);
+	return 1;
 }
 
 // Recebe os arquivos do cliente
@@ -670,8 +670,11 @@ void *receive(void* arg) {
 	int receive_socket = session->sockets.receive_socketfd;
 
 	char *folder_path = get_user_folder(session->user_context->username);
+
 	while (session->active) {
-		handle_incoming_file(session,receive_socket, folder_path);
+		if (!handle_incoming_file(session,receive_socket, folder_path)){
+			break;
+		}
 	}
 	
 	free(folder_path);
