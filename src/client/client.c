@@ -31,8 +31,9 @@ uint16_t console_socket_port = 4000;
 char *username;
 char hostname[20];
 
-atomic_int signal_reset = 0;
 atomic_int signal_shutdown = 0;
+
+int pipefd[2];
 
 char sync_dir_path[PATH_MAX];
 
@@ -205,17 +206,26 @@ void delete(const char *filename, int socketfd) {
 
     printf("Exclusão solicitada.\n");
 }
+
+void shutdown_console_thread() {
+    write(pipefd[1], "x", 1);
+}
+
 void close_client(int socketfd){
-    atomic_store(&signal_reset, 1);
     atomic_store(&signal_shutdown, 1);
 
     Packet *control_packet = create_packet(PACKET_EXIT, 0, NULL);
 
+    fprintf(stderr, "Interface socket on close: %d\n", socketfd);
     if (send_packet(socketfd, control_packet) != OK) {
         fprintf(stderr, "ERROR sending control packet (close client)\n");
         return;
     }
+
+    shutdown_console_thread();
+
     free(control_packet);
+    close(socketfd);
 }
 
 void *start_console_input_thread(void *arg){
@@ -223,60 +233,63 @@ void *start_console_input_thread(void *arg){
     char command[MAX_COMMAND] = "\0";
     char path[MAX_ARGUMENT] = "\0";
 
-    printf("Client started!\n");
+    printf("Client started! socket = %d\n", socketfd);
 
 
-    while (strcmp(command, "exit") != 0 && !atomic_load(&signal_reset))
+    while (strcmp(command, "exit") != 0 && !atomic_load(&signal_shutdown))
     {
-        command[0] = '\0';
-        path[0] = '\0';
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        FD_SET(pipefd[0], &readfds);
 
-        int should_exit = 0;
-        int can_read = has_data(STDIN_FILENO, 2);
-        while ( can_read <= 0 ){
-            if (atomic_load(&signal_reset))
-            {
-                should_exit = 1;
+        int maxfd = (STDIN_FILENO > pipefd[0]) ? STDIN_FILENO : pipefd[0];
+
+        int result = select(maxfd + 1, &readfds, NULL, NULL, NULL);
+        if (result < 0) {
+            perror("select failed");
+            break;
+        }
+
+        if (FD_ISSET(pipefd[0], &readfds)) {
+            char dummy;
+            read(pipefd[0], &dummy, 1);
+            fprintf(stderr, "Console thread received shutdown signal\n");
+            break;
+        }
+
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (get_command(command, path) != GET_COMMAND_OK) {
+                fprintf(stderr, "Invalid input\n");
+                continue;
+            }
+
+            if (strcmp(command, "exit") == 0) {
+                close_client(socketfd);
+                printf("Client closed\n");
                 break;
+            } else if (strcmp(command, "get_sync_dir") == 0) {
+                create_sync_dir();
+            } else if (strcmp(command, "list_client") == 0) {
+                list_client();
+            } else if (strcmp(command, "list_server") == 0) {
+                list_server(socketfd);
+            } else if (strcmp(command, "upload") == 0) {
+                if (upload(path) != 0) {
+                    fprintf(stderr, "ERROR: Failed to upload file.\n");
+                }
+            } else if (strcmp(command, "delete") == 0) {
+                delete(path, socketfd);
+            } else if (strcmp(command, "download") == 0) {
+                download(path, socketfd);
+            } else {
+                printf("Unknown command: %s\n", command);
             }
-            can_read = has_data(STDIN_FILENO, 2);
-        }  
-        if (should_exit)
-        {
-            break;
         }
-
-        get_command(command,path);
-
-        if(atomic_load(&signal_reset)){
-            break;
-        }
-
-        if (strcmp(command, "exit") == 0){
-            close_client(socketfd);
-            printf("Client closed\n");
-            break;
-        } else if (strcmp(command, "get_sync_dir") == 0) {
-            create_sync_dir();
-        } else if (strcmp(command, "list_client") == 0) {
-            list_client();
-        } else if (strcmp(command, "list_server") == 0) {
-            list_server(socketfd);
-        } else if (strcmp(command, "upload") == 0) {
-            if (upload(path) != 0) {
-                fprintf(stderr, "ERROR: Failed to upload file.");
-            }
-        } else if (strcmp(command, "delete") == 0) {
-            delete(path, socketfd);
-        } else if (strcmp(command, "download") == 0) {
-            download(path, socketfd);
-        } else{
-            printf("Unknown command: %s\n", command);
-        }
-      
     }
     threads_exited++;
     close(socketfd);
+    free(arg);
     fprintf(stderr, "Thread console fechou\n");
     pthread_exit(0);
 }
@@ -284,13 +297,13 @@ void *start_console_input_thread(void *arg){
 void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
-    while (atomic_load(&signal_reset) == 0) {
-        PacketTypes result;
+    while (atomic_load(&signal_shutdown) == 0) {
+        PacketTypes result = -1;
 /*
 int should_exit = 0;
 int can_read = has_data(socket, 2);
 while ( can_read <= 0 ){
-    if (atomic_load(&signal_reset))
+    if (atomic_load(&signal_shutdown))
     {
         should_exit = 1;
     }
@@ -304,7 +317,7 @@ if (should_exit)
         
 		char *filename = handle_send_delete(socket, sync_dir_path, &result);
 
-        if(atomic_load(&signal_reset)){
+        if(atomic_load(&signal_shutdown)){
             break;
         }
 
@@ -324,6 +337,7 @@ if (should_exit)
     
     threads_exited++;
     close(socket);
+    free(arg);
     fprintf(stderr, "Thread receiver fechou\n");
 	pthread_exit(NULL);
 }
@@ -348,7 +362,7 @@ void *start_directory_watcher_thread(void* arg) {
     } while(wd < 0);
   
 
-    while (atomic_load(&signal_reset) == 0) {
+    while (atomic_load(&signal_shutdown) == 0) {
         ssize_t length = read(fd, buffer, EVENT_BUF_LEN);
 
         if (length < 0) {
@@ -381,6 +395,8 @@ void *start_directory_watcher_thread(void* arg) {
 
     inotify_rm_watch(fd, wd);
     close(fd);
+    close(socket); 
+    free(arg);
     threads_exited++;
     fprintf(stderr, "Thread watcher fechou\n");
     pthread_exit(NULL);
@@ -454,38 +470,41 @@ int handle_connection(){
         return 1;
     }
 
-    int sock_interface;
-    if (connect_to_server(&sock_interface,server, console_socket_port, username) != 0){
+    int* sock_interface = malloc(sizeof(int));
+    if (connect_to_server(sock_interface,server, console_socket_port, username) != 0){
         exit(EXIT_FAILURE);
     }
     
-    int sock_send, sock_receive;
-    if ((sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    int *sock_send = malloc(sizeof(int));
+    int *sock_receive = malloc(sizeof(int));
+    if ((*sock_send = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         fprintf(stderr, "ERRO abrindo o socket se send\n");
         exit(EXIT_FAILURE);
     }
-    if ((sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    if ((*sock_receive = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         fprintf(stderr, "ERRO abrindo o socket de receive\n");
         exit(EXIT_FAILURE);
     }
     
     struct sockaddr_in send_serv_addr = setup_socket_address(server, send_socket_port);
     struct sockaddr_in receive_serv_addr = setup_socket_address(server, receive_socket_port);
-	if (connect(sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
+	if (connect(*sock_receive, (struct sockaddr *) &receive_serv_addr,sizeof(receive_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor de receive\n");
         exit(EXIT_FAILURE);
     }
-	if (connect(sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
+	if (connect(*sock_send, (struct sockaddr *) &send_serv_addr,sizeof(send_serv_addr)) < 0) {
         fprintf(stderr,"ERRO conectando ao servidor de send\n");
         exit(EXIT_FAILURE);
     }
 
-    atomic_store(&signal_reset, 0);
+    atomic_store(&signal_shutdown, 0);
+
+    fprintf(stderr, "Client sockets: interface = %d - send = %d - receive = %d\n", *sock_interface, *sock_receive, *sock_send);
 
     pthread_t console_thread, file_watcher_thread, receive_files_thread, reconnection_thread; 
-    pthread_create(&console_thread, NULL, start_console_input_thread, (void *) &sock_interface);
-    pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) &sock_send);
-    pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) &sock_receive);
+    pthread_create(&console_thread, NULL, start_console_input_thread, (void *) sock_interface);
+    pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) sock_send);
+    pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) sock_receive);
 
     return 0;
 }
@@ -541,7 +560,7 @@ void *notification_listener(void *vargp) {
         pthread_exit(NULL);
     }
     fprintf(stderr, "Esperando por notificacao de reconexao\n");
-    while (!atomic_load(&signal_shutdown)) {
+    while (1) {
         // 3) aceita conexão de notificação
         notif_fd = accept(listen_fd, (struct sockaddr*)&addr, &addrlen);
         if (notif_fd < 0) {
@@ -549,7 +568,7 @@ void *notification_listener(void *vargp) {
             continue;
         }
 
-        atomic_store(&signal_reset, 1);
+        atomic_store(&signal_shutdown, 1);
 
         Packet *packet = read_packet(notif_fd);
 
@@ -576,8 +595,6 @@ void *notification_listener(void *vargp) {
         handle_connection();
     }
 
-    atomic_store(&signal_reset, 1);
-    sleep(2);
     // nunca alcançado
     close(listen_fd);
     return NULL;
@@ -587,7 +604,6 @@ void *notification_listener(void *vargp) {
 
 
 int main(int argc, char* argv[]){ 
-    atomic_store(&signal_shutdown, 0);
 
     strcpy(hostname,"localhost");
     if (argc >= 2) {
@@ -605,6 +621,11 @@ int main(int argc, char* argv[]){
         console_socket_port = atoi(argv[3]);
     }
 
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(1);
+    }
+
     if(set_sync_dir_path() != 0){
         return EXIT_FAILURE;
     }
@@ -614,6 +635,9 @@ int main(int argc, char* argv[]){
     pthread_t reconnection_thread;
     pthread_create(&reconnection_thread, NULL, notification_listener, NULL);
     pthread_join(reconnection_thread, NULL);
+
+    close(pipefd[0]);
+    close(pipefd[1]);
 
     return EXIT_SUCCESS;
 }
