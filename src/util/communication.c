@@ -157,14 +157,19 @@ size_t get_file_size(FILE *file_ptr){
 int send_packet(int sockfd, const Packet *packet){
     if (packet == NULL) return 0; // TODO código de erro
 
-    ssize_t bytes_sent = send(sockfd, packet, sizeof(Packet) + packet->length, MSG_NOSIGNAL); // Or whatever flags you need
-    if (bytes_sent == -1) {
-        if (errno == EPIPE) {
-            return SOCKET_CLOSED; 
-        } else {
-            perror("Error sending packet"); 
+    ssize_t total_sent = 0;
+    ssize_t to_send = sizeof(Packet) + packet->length;
+    const char *buf = (const char *)packet;
+
+    while (total_sent < to_send) {
+        ssize_t bytes_sent = send(sockfd, buf + total_sent, to_send - total_sent, MSG_NOSIGNAL);
+        if (bytes_sent == -1) {
+            if (errno == EINTR) continue; // Retry if interrupted
+            if (errno == EPIPE) return SOCKET_CLOSED;
+            perror("Error sending packet");
             return -1;
         }
+        total_sent += bytes_sent;
     }
     
     return OK;
@@ -237,22 +242,26 @@ void send_file(const int sockfd, char *filename, char *basepath) {
     free(filepath);
 }
 
-int has_data(int socketfd, int timeout_ms) {
+int has_data(int fd, int timeout_ms) {
     fd_set read_fds;
     FD_ZERO(&read_fds);
-    FD_SET(socketfd, &read_fds);
+    FD_SET(fd, &read_fds);
 
     struct timeval timeout;
     timeout.tv_sec = timeout_ms / 1000;
     timeout.tv_usec = (timeout_ms % 1000) * 1000;
 
-    int result = select(socketfd + 1, &read_fds, NULL, NULL, &timeout);
+    int result = select(fd + 1, &read_fds, NULL, NULL, &timeout);
     if (result < 0) {
         perror("select failed");
-        return -1;
+        return -1; 
     }
 
-    return result; 
+    if (result > 0 && FD_ISSET(fd, &read_fds)) {
+        return 1; 
+    } else {
+        return 0;
+    }
 }
 
 
