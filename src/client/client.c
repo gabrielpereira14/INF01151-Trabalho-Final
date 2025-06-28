@@ -31,7 +31,7 @@ uint16_t console_socket_port = 4000;
 char *username;
 char hostname[20];
 
-atomic_int signal_shutdown = 0;
+atomic_int signal_shutdown = ATOMIC_VAR_INIT(0);
 
 char sync_dir_path[PATH_MAX];
 

@@ -18,15 +18,15 @@
 
 pthread_barrier_t barrier;
 
-atomic_int global_server_mode = UNKNOWN_MODE;
-atomic_int global_shutdown_flag = 0;
+atomic_int global_server_mode = ATOMIC_VAR_INIT(UNKNOWN_MODE);
+atomic_int global_shutdown_flag = ATOMIC_VAR_INIT(0);
 time_t last_heartbeat;
 
 pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t heartbeat_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-atomic_int is_election_running = 0;
-atomic_int new_leader_decided = 0;
+atomic_int is_election_running = ATOMIC_VAR_INIT(0);
+atomic_int new_leader_decided = ATOMIC_VAR_INIT(0);
 int should_start_connection = 0;
 
 void send_heartbeat_to_replicas() {
@@ -273,10 +273,13 @@ void *connect_to_server_thread(void *arg) {
 
             if (has_data(socketfd, 1000) > 0) {
                 Packet *packet = read_packet(socketfd);
-                //print_packet(packet);
                 switch (packet->type) {
                     case PACKET_REPLICA_MSG:{
                         ReplicaEvent event = deserialize_replica_event(packet->payload);
+                        if (event.type != EVENT_HEARTBEAT){
+                            print_packet(packet);
+                        }
+
                         switch (event.type) {
                         case EVENT_CLIENT_CONNECTED:
                             initialize_user_session_and_threads(event.device_address, -1, -1, -1, event.username);
@@ -350,6 +353,7 @@ void *connect_to_server_thread(void *arg) {
                         
                     default :{
                         fprintf(stderr, "[Backup %d Connection Thread] Unsupported packet type: %d\n",id, packet->type);
+                        print_packet(packet);
                         break;
                     }
                 }
@@ -537,6 +541,7 @@ void *run_as_backup(void* arg) {
     int users_disconnected = 0;
 
     if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+        
 
         fprintf(stderr, "Trocando de função \n");
         
@@ -564,12 +569,19 @@ void *run_as_backup(void* arg) {
         struct sockaddr_in new_address = my_new_manager_address;
         new_address.sin_port = htons(interface_socket_port);
     
-        notify_clients_of_server_change(new_address);
+        
+        int current_replica_count = atomic_load(&replica_count);
+        replica_list_destroy();
 
+        while (current_replica_count != atomic_load(&replica_count)) {
+            sleep(1);
+            fprintf(stderr, "Esperando replicas reconectarem\n");
+        }
+
+        notify_clients_of_server_change(new_address);
         disconnect_all_users(&contextTable); 
         users_disconnected = 1;   
 
-        replica_list_destroy();
         pthread_t manager_thread;
         pthread_create(&manager_thread, NULL, manage_replicas, (void *) args);
         pthread_detach(manager_thread);

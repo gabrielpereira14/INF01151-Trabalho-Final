@@ -1,10 +1,11 @@
 #include "./replica.h"
 #include "serverCommon.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <netinet/in.h>
 #include <stdio.h>
 
-int current_manager = -1;
+atomic_int replica_count = ATOMIC_VAR_INIT(0);
 
 static ReplicaNode *head = NULL;
 static pthread_mutex_t replica_list_mutex;
@@ -59,6 +60,8 @@ int add_replica(int socketfd, int id, int listener_port, struct sockaddr_in devi
     newNode->next = head;
     head = newNode;
     pthread_mutex_unlock(&replica_list_mutex);
+
+    atomic_fetch_add(&replica_count, 1);
     fprintf(stderr, "Replica %d successfully added to list\n", id);
     return 1;
 }
@@ -84,6 +87,7 @@ ReplicaNode* replica_list_remove_node(ReplicaNode **head_ptr, ReplicaNode *prev,
     close(node_to_remove->socketfd); 
     free(node_to_remove);
 
+    atomic_fetch_add(&replica_count, -1);
     return (prev == NULL) ? *head_ptr : prev->next;
 }
 
@@ -102,16 +106,47 @@ void replica_list_print_all() {
     pthread_mutex_unlock(&replica_list_mutex); 
 }
 
+int remove_replica_by_id(int id) {
+    pthread_mutex_lock(&replica_list_mutex);
+
+    ReplicaNode *current = head;
+    ReplicaNode *prev = NULL;
+    int removed = 0;
+
+    while (current != NULL) {
+        if (current->id == id) {
+            replica_list_remove_node(&head, prev, current);
+            fprintf(stderr, "Replica %d successfully removed from list.\n", id);
+            removed = 1;
+            break; // Node removed, exit loop
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&replica_list_mutex);
+
+    if (!removed) {
+        fprintf(stderr, "Warning: Replica with ID %d not found in the list.\n", id);
+    }
+    return removed;
+}
+
 void replica_list_destroy() {
     pthread_mutex_lock(&replica_list_mutex); 
     ReplicaNode *current = head;
     ReplicaNode *next;
     while (current != NULL) {
         next = current->next;
+        if (current->socketfd > 0)
+        {
+            close(current->socketfd);
+        }
         free(current);
         current = next;
     }
     head = NULL;
+    atomic_store(&replica_count, 0);
     printf("Replica list destroyed.\n");
     pthread_mutex_unlock(&replica_list_mutex); 
 }
@@ -154,6 +189,11 @@ void send_replicas_data_to_new_replica(int new_replica_sockfd){
 
 int notify_replicas(ReplicaEvent event){
     int notified_replicas = 0;
+
+    if (event.type != EVENT_HEARTBEAT){
+        fprintf(stderr, "Notifying replicas...\n");
+    }
+    
     pthread_mutex_lock(&replica_list_mutex);
     ReplicaNode *current = head;
     ReplicaNode *prev = NULL;

@@ -17,11 +17,12 @@
 
 
 
-extern int  current_manager;
+extern atomic_int replica_count;
 
 int notify_replicas(ReplicaEvent event);
 void listen_for_replicas(int port);
 int add_replica(int socketfd, int id, int listener_port, struct sockaddr_in device_address);
+int remove_replica_by_id(int id);
 void replica_list_destroy();
 
 void connect_to_manager(struct sockaddr_in server_address);

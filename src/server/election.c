@@ -260,6 +260,7 @@ void *election_listener_thread(void *arg){
                 int leader_port = ntohs(event.device_address.sin_port);
 
                 fprintf(stderr, "[Servidor %d] Anúncio recebido: Novo líder é %d em %s:%d.\n", id, leader_id, leader_ip, leader_port);
+                remove_replica_by_id(leader_id);
 
                 
                 atomic_store(&new_leader_decided, 1);
