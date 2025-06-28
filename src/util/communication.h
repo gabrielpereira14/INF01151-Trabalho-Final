@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <linux/limits.h>
 
-#define FILE_CHUNK_SIZE 236
+#define FILE_CHUNK_SIZE 1000 
 #define NOTIFICATION_PORT 12345
 #define MAX_SESSIONS 2
 
@@ -53,15 +53,17 @@ typedef struct sentFile
 } SentFile;
 */
 
-void print_packet(Packet* packet);
+void print_packet(const Packet* packet);
 Packet *create_packet(const PacketTypes type, const uint16_t lenght, const char *payload);
 Packet *read_packet(int newsockfd);
 int send_packet(int sockfd, const Packet *packet);
 void write_packets_to_file(char *filename, uint64_t num_packets, int socket);
 void send_file(const int sockfd, char *filename, char *basepath);
-char *handle_send_delete(int socketfd, const char *path, PacketTypes *result);
+char *handle_send_delete(int socketfd, const char *path, Packet *packet);
 size_t get_file_size(FILE *file_ptr);
 char *create_filepath(const char *base_path, const char *filename);
 int has_data(int socketfd, int timeout_ms);
+char *receive_file(Packet *packet, const char *path, int socketfd);
+char *delete_file(Packet *packet, const char *path);
 
 #endif

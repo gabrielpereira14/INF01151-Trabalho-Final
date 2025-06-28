@@ -389,8 +389,10 @@ void *interface(void* arg) {
 
 	while (session->active) {
 		Packet *command_packet = read_packet(interface_socket);
-
-		//fprintf(stderr, "Command: %d\n", command);
+		if (command_packet->type == PACKET_CONNECTION_CLOSED)
+		{
+			command_packet->type = PACKET_EXIT;
+		}
 
 		switch (command_packet->type) {
 			case PACKET_LIST: {
@@ -557,10 +559,10 @@ int get_file_status(FileNode *list, const char *filename, const char *base_path)
 int handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
 
-	PacketTypes result;
-	char *filename = handle_send_delete(receive_socket, folder_path, &result);
+	Packet *packet = read_packet(receive_socket);
+	char *filename = handle_send_delete(receive_socket, folder_path, packet);
 
-	if (result == PACKET_CONNECTION_CLOSED) {
+	if (packet->type == PACKET_CONNECTION_CLOSED) {
 		fprintf(stderr, "ERROR in incoming file\n");
 		free(filename);
 		return 0;
@@ -570,7 +572,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 	
 	if(session->active) {
 		char *action;
-		switch (result) {
+		switch (packet->type) {
 			case PACKET_SEND:
 				action = "received";
 				break;
@@ -580,7 +582,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 			default:
 				action = "uh-oh";
 		}
-		switch (result) {
+		switch (packet->type) {
 			case PACKET_SEND: {
 				switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
 					case FILE_STATUS_NOT_FOUND: {
@@ -637,7 +639,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 			}
 			break;
 			default:
-				fprintf(stderr, "ERRO unexpected result in handling incoming file: %i\n", result);
+				fprintf(stderr, "ERRO unexpected result in handling incoming file: %i\n", packet->type);
 		}
 
 		fprintf(stderr, "File %s from user %s session %i. Filename: %s\n", action, session->user_context->username, session->session_index, filename);
@@ -645,7 +647,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 
 	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filename != NULL){
 		ReplicaEvent event;
-		switch (result) {
+		switch (packet->type) {
 			case PACKET_SEND:
 				event = create_file_upload_event(session->user_context->username, session->device_address, filename);
 				break;

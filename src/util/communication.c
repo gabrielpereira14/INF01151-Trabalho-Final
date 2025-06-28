@@ -2,7 +2,7 @@
 #include "communication.h"
 #include <stdio.h>
 
-void print_packet(Packet* packet) {
+void print_packet(const Packet* packet) {
     char *type_name;
     switch (packet->type) {
         case PACKET_DATA:
@@ -37,20 +37,20 @@ void print_packet(Packet* packet) {
             break;
     }
 
-    printf("Packet - type: %s length: %i ",
+    fprintf(stderr, "Packet - type: %s length: %i ",
         type_name,
         packet->length);
         
     if (packet->length > 0) {
-        printf("payload: ");
+        fprintf(stderr,"payload: ");
         for (size_t i = 0; i < packet->length; i++) {
-            printf("%c", packet->payload[i]);
+            fprintf(stderr,"%c", packet->payload[i]);
         }
     } else {
-        printf("empty_payload");
+        fprintf(stderr,"empty_payload");
     }
 
-    printf("\n");
+    fprintf(stderr,"\n");
 }
 
 Packet* create_packet(const PacketTypes type, const uint16_t lenght, const char *payload){
@@ -66,6 +66,7 @@ Packet* create_packet(const PacketTypes type, const uint16_t lenght, const char 
         memcpy(packet->payload, payload, lenght);
     }
 
+    fprintf(stderr, "Pacote criado: %d\n", type);
     return packet;
 }
 
@@ -157,19 +158,14 @@ size_t get_file_size(FILE *file_ptr){
 int send_packet(int sockfd, const Packet *packet){
     if (packet == NULL) return 0; // TODO código de erro
 
-    ssize_t total_sent = 0;
-    ssize_t to_send = sizeof(Packet) + packet->length;
-    const char *buf = (const char *)packet;
-
-    while (total_sent < to_send) {
-        ssize_t bytes_sent = send(sockfd, buf + total_sent, to_send - total_sent, MSG_NOSIGNAL);
-        if (bytes_sent == -1) {
-            if (errno == EINTR) continue; // Retry if interrupted
-            if (errno == EPIPE) return SOCKET_CLOSED;
-            perror("Error sending packet");
+    ssize_t bytes_sent = send(sockfd, packet, sizeof(Packet) + packet->length, MSG_NOSIGNAL); // Or whatever flags you need
+    if (bytes_sent == -1) {
+        if (errno == EPIPE) {
+            return SOCKET_CLOSED; 
+        } else {
+            perror("Error sending packet"); 
             return -1;
         }
-        total_sent += bytes_sent;
     }
     
     return OK;
@@ -177,10 +173,18 @@ int send_packet(int sockfd, const Packet *packet){
 
 char *read_file_chunk(FILE *file, size_t chunk_size, size_t *bytes_read) {
     char *buffer = malloc(chunk_size);
-    if (!buffer) return NULL;
+    if (!buffer){
+        fprintf(stderr, "Malloc falhou\n");
+        return NULL;
+    }
 
     *bytes_read = fread(buffer, 1, chunk_size, file);
-    if (*bytes_read < chunk_size && !feof(file)) {
+    if (*bytes_read == 0) {
+        if (feof(file)) {
+            fprintf(stderr, "Leu todo arquivo\n");
+        } else if (ferror(file)) {
+            perror("File read error");
+        }
         free(buffer);
         return NULL;
     }
@@ -221,10 +225,16 @@ void send_file(const int sockfd, char *filename, char *basepath) {
 
     size_t total_bytes_read = 0;
     int current_packet = 0;
-    while (total_bytes_read < file_size) {
+    while (!feof(file_ptr)) {
         size_t bytes_read;
         char *chunk = read_file_chunk(file_ptr, FILE_CHUNK_SIZE, &bytes_read);
+        if (!chunk) {
+            fprintf(stderr, "send_file: ERROR reading file chunk\n");
+            break;
+        }
+
         Packet *packet = create_packet(PACKET_DATA, bytes_read, chunk);
+
 
         if (send_packet(sockfd, packet) != OK) {
             fprintf(stderr, "send_file: ERROR sending file data packet\n");
@@ -264,49 +274,48 @@ int has_data(int fd, int timeout_ms) {
     }
 }
 
+char *receive_file(Packet *packet, const char *path, int socketfd){
+    FileAnnoucement *announcement = (FileAnnoucement*)(packet->payload);
 
-char *handle_send_delete(int socketfd, const char *path, PacketTypes *result){
-    Packet *packet = read_packet(socketfd);
+    char *filename = malloc(announcement->filename_length + 1);
+    memcpy(filename, announcement->filename, announcement->filename_length);
+    filename[announcement->filename_length] = '\0';
+
+    char *filepath = create_filepath(path, filename);
+    write_packets_to_file(filepath, announcement->num_packets, socketfd);
+    free(filepath);
+    return filename;
+}
+
+char *delete_file(Packet *packet, const char *path){
+    char *filename = malloc(packet->length + 1);
+    memcpy(filename, packet->payload, packet->length);
+    filename[packet->length] = '\0';
+
+    char *filepath = create_filepath(path, filename);
+
+    if (remove(filepath) != 0) {
+        fprintf(stderr, "Unable to delete file '%s': ", filepath);
+        perror(NULL);
+    }
+    free(filepath);
+    return filename;
+}
+
+char *handle_send_delete(int socketfd, const char *path, Packet *packet){
     switch (packet->type) {
         case PACKET_SEND: {
             if (packet->length == 0){
-                *result = PACKET_CONNECTION_CLOSED;
                 return NULL;
             }
-        
-            FileAnnoucement *announcement = (FileAnnoucement*)(packet->payload);
-
-            char *filename = malloc(announcement->filename_length + 1);
-            memcpy(filename, announcement->filename, announcement->filename_length);
-            filename[announcement->filename_length] = '\0';
-
-            char *filepath = create_filepath(path, filename);
-            write_packets_to_file(filepath, announcement->num_packets, socketfd);
-        
-            free(filepath);
-            free(packet);
-
-            *result = PACKET_SEND;
+            char *filename = receive_file(packet, path, socketfd);
             return filename;
         }
         case PACKET_DELETE: {
-            char *filename = malloc(packet->length + 1);
-            memcpy(filename, packet->payload, packet->length);
-            filename[packet->length] = '\0';
-
-            char *filepath = create_filepath(path, filename);
-
-            if (remove(filepath) != 0) {
-                fprintf(stderr, "Unable to delete file '%s': ", filepath);
-                perror(NULL);
-            }
-
-            free(filepath);
-            *result = PACKET_DELETE;
+            char *filename = delete_file(packet, path);
             return filename;
         }
         default: {
-            *result = packet->type;
             return NULL;
         }
 

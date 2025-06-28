@@ -33,8 +33,6 @@ char hostname[20];
 
 atomic_int signal_shutdown = 0;
 
-int pipefd[2];
-
 char sync_dir_path[PATH_MAX];
 
 int create_sync_dir(){
@@ -183,9 +181,9 @@ void download(const char *filename, int socketfd) {
     free(command);
 
     // SAlva o arquivo no diretorio atual
-    PacketTypes result;
-    handle_send_delete(socketfd, ".", &result);
-    if (result != PACKET_SEND) {
+    Packet *packet = read_packet(socketfd);
+    handle_send_delete(socketfd, ".", packet);
+    if (packet->type != PACKET_SEND) {
         fprintf(stderr, "Failed to download file '%s'\n", filename);
         return;
     }
@@ -207,9 +205,6 @@ void delete(const char *filename, int socketfd) {
     printf("Exclusão solicitada.\n");
 }
 
-void shutdown_console_thread() {
-    write(pipefd[1], "x", 1);
-}
 
 void close_client(int socketfd){
     atomic_store(&signal_shutdown, 1);
@@ -221,8 +216,6 @@ void close_client(int socketfd){
         fprintf(stderr, "ERROR sending control packet (close client)\n");
         return;
     }
-
-    shutdown_console_thread();
 
     free(control_packet);
     close(socketfd);
@@ -238,33 +231,14 @@ void *start_console_input_thread(void *arg){
 
     while (strcmp(command, "exit") != 0 && !atomic_load(&signal_shutdown))
     {
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(STDIN_FILENO, &readfds);
-        FD_SET(pipefd[0], &readfds);
+        command[0] = '\0';
+        path[0] = '\0';
 
-        int maxfd = (STDIN_FILENO > pipefd[0]) ? STDIN_FILENO : pipefd[0];
-
-        int result = select(maxfd + 1, &readfds, NULL, NULL, NULL);
-        if (result < 0) {
-            perror("select failed");
-            break;
-        }
-
-        if (FD_ISSET(pipefd[0], &readfds)) {
-            char dummy;
-            read(pipefd[0], &dummy, 1);
-            fprintf(stderr, "Console thread received shutdown signal\n");
-            break;
-        }
-
-        if (FD_ISSET(STDIN_FILENO, &readfds)) {
-            if (get_command(command, path) != GET_COMMAND_OK) {
-                fprintf(stderr, "Invalid input\n");
+        if (has_data(STDIN_FILENO, 500)) { 
+            if (get_command(command, path) != GET_COMMAND_OK)
                 continue;
-            }
 
-            if (strcmp(command, "exit") == 0) {
+            if (strcmp(command, "exit") == 0){
                 close_client(socketfd);
                 printf("Client closed\n");
                 break;
@@ -276,16 +250,20 @@ void *start_console_input_thread(void *arg){
                 list_server(socketfd);
             } else if (strcmp(command, "upload") == 0) {
                 if (upload(path) != 0) {
-                    fprintf(stderr, "ERROR: Failed to upload file.\n");
+                    fprintf(stderr, "ERROR: Failed to upload file.");
                 }
             } else if (strcmp(command, "delete") == 0) {
                 delete(path, socketfd);
             } else if (strcmp(command, "download") == 0) {
                 download(path, socketfd);
-            } else {
+            } else{
                 printf("Unknown command: %s\n", command);
             }
-        }
+            
+        } else if (atomic_load(&signal_shutdown)) {
+            break; 
+        } 
+
     }
     threads_exited++;
     close(socketfd);
@@ -298,7 +276,6 @@ void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
     while (atomic_load(&signal_shutdown) == 0) {
-        PacketTypes result = -1;
 /*
 int should_exit = 0;
 int can_read = has_data(socket, 2);
@@ -314,18 +291,19 @@ if (should_exit)
     break;
 }
 */
-        
-		char *filename = handle_send_delete(socket, sync_dir_path, &result);
+
+        Packet *packet = read_packet(socket);
+		char *filename = handle_send_delete(socket, sync_dir_path, packet);
 
         if(atomic_load(&signal_shutdown)){
             break;
         }
 
-        if (result == PACKET_SEND) {
+        if (packet->type == PACKET_SEND) {
             printf("File '%s' received\n", filename);
-        } else if (result == PACKET_DELETE) {
+        } else if (packet->type  == PACKET_DELETE) {
             printf("File '%s' deleted\n", filename);
-        } else if (result == PACKET_CONNECTION_CLOSED) {
+        } else if (packet->type  == PACKET_CONNECTION_CLOSED) {
             fprintf(stderr, "Connection closed\n");
             free(filename);
 	        break;
@@ -621,11 +599,6 @@ int main(int argc, char* argv[]){
         console_socket_port = atoi(argv[3]);
     }
 
-    if (pipe(pipefd) == -1) {
-        perror("pipe");
-        exit(1);
-    }
-
     if(set_sync_dir_path() != 0){
         return EXIT_FAILURE;
     }
@@ -635,9 +608,6 @@ int main(int argc, char* argv[]){
     pthread_t reconnection_thread;
     pthread_create(&reconnection_thread, NULL, notification_listener, NULL);
     pthread_join(reconnection_thread, NULL);
-
-    close(pipefd[0]);
-    close(pipefd[1]);
 
     return EXIT_SUCCESS;
 }
