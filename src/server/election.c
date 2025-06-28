@@ -207,7 +207,7 @@ void *election_listener_thread(void *arg){
         if (result > 0) {
             Packet *packet = read_packet(election_socket);
 
-            if (packet->type == PACKET_CONNECTION_CLOSED)
+            if (!packet || packet->type == PACKET_CONNECTION_CLOSED)
             {
                 break;
             }
