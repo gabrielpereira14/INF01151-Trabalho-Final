@@ -370,6 +370,67 @@ char* list_files(const char *folder_path) {
     return result;
 }
 
+void send_file_event_to_replicas(Session *session, enum PacketTypes type, char *filename){
+	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filename != NULL){
+		ReplicaEvent event;
+		switch (type) {
+			case PACKET_SEND:
+				event = create_file_upload_event(session->user_context->username, session->device_address, filename);
+				break;
+			case PACKET_DELETE:
+				event = create_file_delete_event(session->user_context->username, session->device_address, filename);
+			default:
+				break;
+		}
+
+		notify_replicas(event);
+		free_event(event);
+	}
+}
+
+int get_file_status(FileNode *list, const char *filename, const char *base_path) {
+	if (list == NULL){
+		return FILE_STATUS_NOT_FOUND;
+	}
+
+	FileNode *file_node = FileLinkedList_get(list, filename);
+
+	if (file_node == NULL){
+		return FILE_STATUS_NOT_FOUND;
+	}
+
+	char *filepath = create_filepath(base_path, filename);
+	uint32_t old_crc = file_node->crc;
+    uint32_t new_crc = crc32(filepath);
+	free(filepath);
+
+	if (new_crc != old_crc) {
+		return FILE_STATUS_UPDATED;
+	}
+
+    return FILE_STATUS_EXISTS;
+}
+
+
+void remove_file(Session *session, char* filename , const char *folder_path){
+	switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
+		case FILE_STATUS_NOT_FOUND:
+			break;
+		case FILE_STATUS_UPDATED:
+		case FILE_STATUS_EXISTS: 
+			if (remove_file_from_context(&contextTable,filename,session->user_context->username) != 0){
+				fprintf(stderr, "ERROR removendo arquivo do contexto");
+			}					
+			if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
+				for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
+					if (send_to_index != session->session_index) {
+						send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_DELETE);
+					}
+				}
+			}
+	}
+}
+
 void signal_shutdown(Session *session) {
     pthread_mutex_lock(&session->sync_buffer.lock);
     pthread_cond_broadcast(&session->sync_buffer.not_empty);
@@ -448,13 +509,11 @@ void *interface(void* arg) {
 
   	  			if (access(filepath, F_OK) != 0) {
   	    	  		fprintf(stderr, "ERROR file not found: %s\n", filepath);
-  	  			} else if (remove(filepath) == 0) {
-  	    	  		printf("Arquivo excluído: '%s'\n", filepath);
   	  			} else {
-  	    	  		fprintf(stderr, "[Servidor] ERROR deleting file '%s': ", filepath);
-					perror(NULL);
-  	  			}
-
+					remove_file(session,filename, folder_path);
+					send_file_event_to_replicas(session, PACKET_DELETE, filename);
+  	    	  		printf("Arquivo excluído: '%s'\n", filepath);
+  	  			} 
 				free(filepath);
   	  			break;
 			}
@@ -533,28 +592,7 @@ void *send_f(void* arg) {
 	pthread_exit(NULL);
 }
 
-int get_file_status(FileNode *list, const char *filename, const char *base_path) {
-	if (list == NULL){
-		return FILE_STATUS_NOT_FOUND;
-	}
 
-	FileNode *file_node = FileLinkedList_get(list, filename);
-
-	if (file_node == NULL){
-		return FILE_STATUS_NOT_FOUND;
-	}
-
-	char *filepath = create_filepath(base_path, filename);
-	uint32_t old_crc = file_node->crc;
-    uint32_t new_crc = crc32(filepath);
-	free(filepath);
-
-	if (new_crc != old_crc) {
-		return FILE_STATUS_UPDATED;
-	}
-
-    return FILE_STATUS_EXISTS;
-}
 
 int handle_incoming_file(Session *session, int receive_socket, const char *folder_path) {
     create_folder_if_not_exists(USER_FILES_FOLDER,session->user_context->username);
@@ -567,6 +605,8 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 		free(filename);
 		return 0;
 	}
+
+	fprintf(stderr, "handling file\n");
 
 	char *filepath = create_filepath(folder_path, filename);
 	
@@ -620,22 +660,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 			}
 			break;
 			case PACKET_DELETE: {
-				switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
-					case FILE_STATUS_NOT_FOUND:
-						break;
-					case FILE_STATUS_UPDATED:
-					case FILE_STATUS_EXISTS: 
-						if (remove_file_from_context(&contextTable,filename,session->user_context->username) != 0){
-							fprintf(stderr, "ERROR removendo arquivo do contexto");
-						}					
-						if (atomic_load(&global_server_mode) == BACKUP_MANAGER) {
-							for (int send_to_index = 0; send_to_index < MAX_SESSIONS; send_to_index++) {
-								if (send_to_index != session->session_index) {
-									send_file_to_session(send_to_index, session->user_context, filename, FILE_ENTRY_DELETE);
-								}
-							}
-						}
-				}
+				remove_file(session, filename, folder_path);
 			}
 			break;
 			default:
@@ -645,21 +670,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 		fprintf(stderr, "File %s from user %s session %i. Filename: %s\n", action, session->user_context->username, session->session_index, filename);
 	}
 
-	if(atomic_load(&global_server_mode) == BACKUP_MANAGER && filename != NULL){
-		ReplicaEvent event;
-		switch (packet->type) {
-			case PACKET_SEND:
-				event = create_file_upload_event(session->user_context->username, session->device_address, filename);
-				break;
-			case PACKET_DELETE:
-				event = create_file_delete_event(session->user_context->username, session->device_address, filename);
-			default:
-				break;
-		}
-
-		notify_replicas(event);
-		free_event(event);
-	}
+	send_file_event_to_replicas(session, packet->type, filename);
 
 	free(filename);
 	free(filepath);
