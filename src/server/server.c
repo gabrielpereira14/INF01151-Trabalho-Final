@@ -412,9 +412,10 @@ int get_file_status(FileNode *list, const char *filename, const char *base_path)
 }
 
 
-void remove_file(Session *session, char* filename , const char *folder_path){
+void remove_file_from_user_list(Session *session, char* filename , const char *folder_path){
 	switch (get_file_status(session->user_context->file_list, filename, folder_path)) {
 		case FILE_STATUS_NOT_FOUND:
+			fprintf(stderr, "File not found: %s", filename);
 			break;
 		case FILE_STATUS_UPDATED:
 		case FILE_STATUS_EXISTS: 
@@ -510,9 +511,13 @@ void *interface(void* arg) {
   	  			if (access(filepath, F_OK) != 0) {
   	    	  		fprintf(stderr, "ERROR file not found: %s\n", filepath);
   	  			} else {
-					remove_file(session,filename, folder_path);
+					remove_file_from_user_list(session, filename, folder_path);
+					if (remove(filepath) != 0) {
+						fprintf(stderr, "Unable to delete file '%s': ", filepath);
+						perror(NULL);
+					}
 					send_file_event_to_replicas(session, PACKET_DELETE, filename);
-  	    	  		printf("Arquivo excluído: '%s'\n", filepath);
+  	    	  		fprintf(stderr, "Arquivo excluído: '%s'\n", filepath);
   	  			} 
 				free(filepath);
   	  			break;
@@ -660,7 +665,7 @@ int handle_incoming_file(Session *session, int receive_socket, const char *folde
 			}
 			break;
 			case PACKET_DELETE: {
-				remove_file(session, filename, folder_path);
+				remove_file_from_user_list(session, filename, folder_path);
 			}
 			break;
 			default:
