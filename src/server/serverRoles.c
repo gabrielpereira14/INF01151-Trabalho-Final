@@ -17,15 +17,15 @@
 #define HEARTBEAT_TIMEOUT_SECONDS 5
 
 
-atomic_int global_server_mode = ATOMIC_VAR_INIT(UNKNOWN_MODE);
-atomic_int global_shutdown_flag = ATOMIC_VAR_INIT(0);
+atomic_int global_server_mode = UNKNOWN_MODE;
+atomic_int global_shutdown_flag = 0;
 time_t last_heartbeat;
 
 pthread_mutex_t mode_change_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t heartbeat_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-atomic_int is_election_running = ATOMIC_VAR_INIT(0);
-atomic_int new_leader_decided = ATOMIC_VAR_INIT(0);
+atomic_int is_election_running = 0;
+atomic_int new_leader_decided = 0;
 int should_start_connection = 0;
 
 void send_heartbeat_to_replicas() {

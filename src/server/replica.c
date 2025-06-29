@@ -5,7 +5,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
-atomic_int replica_count = ATOMIC_VAR_INIT(0);
+atomic_int replica_count = 0;
 
 static ReplicaNode *head = NULL;
 static pthread_mutex_t replica_list_mutex;
