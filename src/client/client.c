@@ -31,6 +31,7 @@ uint16_t console_socket_port = 4000;
 char *username;
 char hostname[20];
 
+atomic_int signal_reconnect = ATOMIC_VAR_INIT(0);
 atomic_int signal_shutdown = ATOMIC_VAR_INIT(0);
 
 char sync_dir_path[PATH_MAX];
@@ -229,7 +230,7 @@ void *start_console_input_thread(void *arg){
     printf("Client started! socket = %d\n", socketfd);
 
 
-    while (strcmp(command, "exit") != 0 && !atomic_load(&signal_shutdown))
+    while (strcmp(command, "exit") != 0 && !atomic_load(&signal_reconnect) || !atomic_load(&signal_shutdown))
     {
         command[0] = '\0';
         path[0] = '\0';
@@ -260,7 +261,7 @@ void *start_console_input_thread(void *arg){
                 printf("Unknown command: %s\n", command);
             }
             
-        } else if (atomic_load(&signal_shutdown)) {
+        } else if (atomic_load(&signal_reconnect) || atomic_load(&signal_shutdown)) {
             break; 
         } 
 
@@ -275,27 +276,12 @@ void *start_console_input_thread(void *arg){
 void *start_file_receiver_thread(void* arg) {
     int socket = *(int*)arg;
 
-    while (atomic_load(&signal_shutdown) == 0) {
-/*
-int should_exit = 0;
-int can_read = has_data(socket, 2);
-while ( can_read <= 0 ){
-    if (atomic_load(&signal_shutdown))
-    {
-        should_exit = 1;
-    }
-    can_read = has_data(socket, 2);
-}  
-if (should_exit)
-{
-    break;
-}
-*/
+    while (atomic_load(&signal_reconnect) == 0 && atomic_load(&signal_shutdown) == 0) {
 
         Packet *packet = read_packet(socket);
 		char *filename = handle_send_delete(socket, sync_dir_path, packet);
 
-        if(atomic_load(&signal_shutdown)){
+        if(atomic_load(&signal_reconnect) || atomic_load(&signal_shutdown)){
             break;
         }
 
@@ -340,7 +326,7 @@ void *start_directory_watcher_thread(void* arg) {
     } while(wd < 0);
   
 
-    while (atomic_load(&signal_shutdown) == 0) {
+    while (atomic_load(&signal_reconnect) == 0 && atomic_load(&signal_shutdown) == 0) {
         ssize_t length = read(fd, buffer, EVENT_BUF_LEN);
 
         if (length < 0) {
@@ -475,7 +461,7 @@ int handle_connection(){
         exit(EXIT_FAILURE);
     }
 
-    atomic_store(&signal_shutdown, 0);
+    atomic_store(&signal_reconnect, 0);
 
     fprintf(stderr, "Client sockets: interface = %d - send = %d - receive = %d\n", *sock_interface, *sock_receive, *sock_send);
 
@@ -538,7 +524,17 @@ void *notification_listener(void *vargp) {
         pthread_exit(NULL);
     }
     fprintf(stderr, "Esperando por notificacao de reconexao\n");
-    while (1) {
+    while (!atomic_load(&signal_shutdown)) {
+
+        int data_available = has_data(listen_fd, 1000);
+
+        if (data_available == -1) {
+            // Error from select
+            perror("notification_listener: has_data");
+            continue;
+        } else if (data_available == 0) {
+            continue;
+        }
         // 3) aceita conexão de notificação
         notif_fd = accept(listen_fd, (struct sockaddr*)&addr, &addrlen);
         if (notif_fd < 0) {
@@ -546,7 +542,7 @@ void *notification_listener(void *vargp) {
             continue;
         }
 
-        atomic_store(&signal_shutdown, 1);
+        atomic_store(&signal_reconnect, 1);
 
         Packet *packet = read_packet(notif_fd);
 
@@ -573,7 +569,6 @@ void *notification_listener(void *vargp) {
         handle_connection();
     }
 
-    // nunca alcançado
     close(listen_fd);
     return NULL;
 }
