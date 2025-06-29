@@ -22,6 +22,4 @@
 
 void *replica_listener_thread(void *arg);
 
-extern pthread_barrier_t barrier;
-
 #endif 

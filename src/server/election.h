@@ -12,6 +12,5 @@ ElectionEvent *create_coordinator_event(ElectionEvent *event, int leader_id, str
 
 void send_coordinator_msg(int my_id, struct sockaddr_in new_manager_address);
 int send_election_event(ElectionEvent* event, int socketfd);
-void wait_for_barrier();
 
 #endif

@@ -16,7 +16,6 @@
 
 #define HEARTBEAT_TIMEOUT_SECONDS 5
 
-pthread_barrier_t barrier;
 
 atomic_int global_server_mode = ATOMIC_VAR_INIT(UNKNOWN_MODE);
 atomic_int global_shutdown_flag = ATOMIC_VAR_INIT(0);

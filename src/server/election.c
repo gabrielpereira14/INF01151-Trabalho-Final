@@ -10,15 +10,6 @@
 static int election_answer_received = 0;
 static pthread_mutex_t answer_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void wait_for_barrier(){
-    int rc = pthread_barrier_wait(&barrier);
-    if (rc == PTHREAD_BARRIER_SERIAL_THREAD) {
-         fprintf(stderr, "Passou a barreira");
-    } else if (rc != 0) {
-        fprintf(stderr, "Error waiting at barrier: %d\n", rc);
-    }
-}
-
 char* serialize_election_event(const ElectionEvent *event) {
     char ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(event->device_address.sin_addr), ip, INET_ADDRSTRLEN);
