@@ -555,7 +555,7 @@ void *run_as_backup(void* arg) {
         my_new_manager_address.sin_port = htons(backup_args->listener_port);
 
         struct hostent *server;
-        if ((server = gethostbyname(backup_args->hostname)) == NULL) {
+        if ((server = gethostbyname(my_server_ip)) == NULL) {
             fprintf(stderr,"ERRO servidor nao encontrado\n");
         }
         memcpy(&my_new_manager_address.sin_addr, server->h_addr, server->h_length);
