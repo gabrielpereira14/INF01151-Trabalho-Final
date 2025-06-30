@@ -142,8 +142,8 @@ void list_client() {
 
     struct dirent *entry;
     struct stat info;
-    char path[PATH_MAX];
     char time_str[20];
+
 
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.' && 
@@ -151,8 +151,11 @@ void list_client() {
            (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
             continue;
         }
+        
+        size_t path_len = strlen(sync_dir_path) + strlen(entry->d_name) + 2; // '/' and '\0'
+        char *path = malloc(path_len);
+        snprintf(path, path_len, "%s/%s", sync_dir_path, entry->d_name);
 
-        snprintf(path, sizeof(path), "%s/%s", sync_dir_path, entry->d_name);
         if (stat(path, &info) == 0) {
             printf("\nFile: %s\n", entry->d_name);
 
