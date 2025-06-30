@@ -230,7 +230,7 @@ void *start_console_input_thread(void *arg){
     printf("Client started! socket = %d\n", socketfd);
 
 
-    while (strcmp(command, "exit") != 0 && !atomic_load(&signal_reconnect) || !atomic_load(&signal_shutdown))
+    while (strcmp(command, "exit") != 0 && !atomic_load(&signal_reconnect) && !atomic_load(&signal_shutdown))
     {
         command[0] = '\0';
         path[0] = '\0';
