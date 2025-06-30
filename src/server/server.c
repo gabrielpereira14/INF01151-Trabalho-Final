@@ -20,7 +20,7 @@ void *interface(void* arg); // Recebe e executa os comandos do usuário
 void *send_f(void* arg); // Envia os arquivos para o cliente
 void *receive(void* arg); // Recebe os arquivos do cliente
 void *replication_management(void *args);
-void termination(int sig);
+void termination();
 
 // Variáveis definidas globalmente para poderem ser fechadas na função de terminação
 // -1 sempre é um fd inválido, e pode ser fechado sem problemas
@@ -699,7 +699,7 @@ void *receive(void* arg) {
 	pthread_exit(NULL);
 }
 
-void termination(int sig) {
+void termination() {
 	close(sock_interface_listen);
 	close(sock_send_listen);
 	close(sock_receive_listen);
