@@ -180,7 +180,7 @@ void send_replicas_data_to_new_replica(int new_replica_sockfd){
 
      while (current != NULL) {
         ReplicaEvent event = create_replica_added_event( current->id, current->listener_port, current->device_address);
-        int return_code = send_event(event, new_replica_sockfd);
+        send_event(event, new_replica_sockfd);
         free_event(event);
         current = current->next;
     }

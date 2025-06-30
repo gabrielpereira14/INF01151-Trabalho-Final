@@ -465,7 +465,7 @@ int handle_connection(){
 
     fprintf(stderr, "Client sockets: interface = %d - send = %d - receive = %d\n", *sock_interface, *sock_receive, *sock_send);
 
-    pthread_t console_thread, file_watcher_thread, receive_files_thread, reconnection_thread; 
+    pthread_t console_thread, file_watcher_thread, receive_files_thread; 
     pthread_create(&console_thread, NULL, start_console_input_thread, (void *) sock_interface);
     pthread_create(&file_watcher_thread, NULL, start_directory_watcher_thread, (void*) sock_send);
     pthread_create(&receive_files_thread, NULL, start_file_receiver_thread, (void*) sock_receive);
@@ -489,8 +489,7 @@ typedef struct {
  * 3) Fecha a conexão antiga ((args->sockfd)), atualiza host/port;
  * 4) Chama connect_to_server(args->sockfd, ...) para reestabelecer.
  */
-void *notification_listener(void *vargp) {
-    ReconnArgs       *args     = (ReconnArgs *)vargp;
+void *notification_listener() {
     int                notif_fd;
     struct sockaddr_in addr;
     socklen_t          addrlen = sizeof(addr);

@@ -211,7 +211,6 @@ void send_file(const int sockfd, char *filename, char *basepath) {
     memcpy(announcement->filename, filename, strlen(filename));
 
     Packet *announcement_packet = create_packet(PACKET_SEND, sizeof(FileAnnoucement) + strlen(filename), (char*)announcement);
-    FileAnnoucement *announcement_teste = (FileAnnoucement*)(announcement_packet->payload);
     
     if (send_packet(sockfd, announcement_packet) != OK) {
         fprintf(stderr, "send_file: ERROR sending file announcement\n");

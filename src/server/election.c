@@ -131,7 +131,7 @@ void *run_election(void *arg) {
     fprintf(stderr, "[Servidor %d] Iniciando eleição...\n", my_id);
     // Reseta o estado de resposta
 
-    ReplicaNode* current_replicas = get_replica_list_head();
+    get_replica_list_head();
     int sent_to_higher_id = send_election_msg(my_id);
 
     if (!sent_to_higher_id) {
