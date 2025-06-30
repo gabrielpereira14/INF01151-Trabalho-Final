@@ -1,5 +1,4 @@
 #include <netinet/in.h>
-#define _DEFAULT_SOURCE // Concerta o aviso chato sobre o h_addr do hostent
 #include "./serverRoles.h"
 #include "./serverCommon.h"
 #include "replica.h"
